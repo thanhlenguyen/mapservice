@@ -24,20 +24,27 @@
     "staticAttributionText": "© OpenMapTiles © OpenStreetMap contributors"
   },
   "styles": {
-    "ksa-style": {
+    "basic-style": {
       "style": "style.json",
       "tilejson": {
             "type": "overlay",
             "bounds": [-180, -85.0511, 180, 85.0511]
       }
     },
-    "satellite-style": {
+    "sat-style": {
       "style": "style_sat.json",
       "tilejson": {
             "type": "overlay",
             "bounds": [-180, -85.0511, 180, 85.0511]
       }
-    }      
+    },
+    "3d-style": {
+      "style": "style_3d.json",
+      "tilejson": {
+            "type": "overlay",
+            "bounds": [-180, -85.0511, 180, 85.0511]
+      }
+    }            
   },
   "data": {
     "Administrative": {
