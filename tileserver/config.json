@@ -1,0 +1,59 @@
+{
+  "options": {
+    "paths": {
+      "root": "/tileserver",
+      "fonts": "fonts",
+      "sprites": "sprites",
+      "styles": "styles",
+      "mbtiles": "/data/mbtiles"
+    },
+    "domains": [
+      "localhost:8080",
+      "127.0.0.1:8080"
+    ],
+    "formatQuality": {
+      "jpeg": 80,
+      "webp": 90
+    },
+    "maxScaleFactor": 3,
+    "maxSize": 2048,
+    "pbfAlias": "pbf",
+    "serveAllFonts": false,
+    "serveAllStyles": false,
+    "serveStaticMaps": true,
+    "staticAttributionText": "© OpenMapTiles © OpenStreetMap contributors"
+  },
+  "styles": {
+    "ksa-style": {
+      "style": "style.json",
+      "tilejson": {
+            "type": "overlay",
+            "bounds": [-180, -85.0511, 180, 85.0511]
+      }
+    },
+    "satellite-style": {
+      "style": "style_sat.json",
+      "tilejson": {
+            "type": "overlay",
+            "bounds": [-180, -85.0511, 180, 85.0511]
+      }
+    }      
+  },
+  "data": {
+    "Administrative": {
+      "mbtiles": "Administrative.mbtiles"
+    },
+    "Administrative_label": {
+      "mbtiles": "Administrative_label.mbtiles"
+    },
+    "City_District_Zone": {
+      "mbtiles": "City_District_Zone.mbtiles"
+    },
+    "address_layer": {
+      "mbtiles": "address_layer.mbtiles"
+    },
+    "street_centerline": {
+      "mbtiles": "street_centerline.mbtiles"
+    }
+  }
+}

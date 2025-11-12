@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MapLibre GL JS with Hover and Click Info</title>
+    <!-- Include MapLibre GL JS CSS -->
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        .maplibregl-popup-content { 
+            font-family: 'Open Sans', sans-serif;
+            padding: 10px;
+            max-width: 200px;
+            background-color: #f0f0f0;
+            border: 1px solid #333;
+            border-radius: 5px; 
+        }
+    </style>
+</head>
+<body>
+    <!-- Map container -->
+    <div id="map"></div>
+
+    <!-- Display the information in a sidebar -->
+
+    <!-- <div id="info" style="position: absolute; top: 10px; right: 10px; background: white; padding: 10px;"></div> -->
+
+    <!-- Include MapLibre GL JS -->
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <script>
+        // Get the base style URL from the TileServer GL endpoint.
+        // 'ksa-style' must match the key you defined in config.json's "styles" object.
+        const styleUrl = 'http://localhost:8080/styles/ksa-style/style.json';
+
+        // Initialize the map
+        var map = new maplibregl.Map({
+            container: 'map',
+            style: styleUrl, // Reference the external style.json file
+            center: [44, 24], // Adjust based on TileJSON bounds
+            zoom: 4, // Adjust based on data
+            pitch: 45, // For 3D extrusion
+            maxPitch: 85,
+            bearing: 0
+        });
+
+        // Variable to track the hovered feature
+        let hoveredFeatureId = null;
+
+        // Add hover and click effects
+        map.on('load', () => {
+            // Hover effect: Change color on mouseover
+            map.on('mouseover', 'address-3d', (e) => {
+                // Change cursor to pointer
+                map.getCanvas().style.cursor = 'pointer';
+
+                // Update fill-extrusion-color based on hover state
+                map.setPaintProperty('address-3d', 'fill-extrusion-color', [
+                    'case',
+                    ['boolean', ['feature-state', 'hover'], false],
+                    '#FFFF00', // Highlight color (yellow) when hovered
+                    '#ECE5E5'  // Default color
+                ]);
+
+                // Set hover state for the feature under the mouse
+                if (e.features.length > 0) {
+                    if (hoveredFeatureId !== null) {
+                        map.setFeatureState(
+                            { source: 'address_layer', sourceLayer: 'Short_Address', id: hoveredFeatureId },
+                            { hover: false }
+                        );
+                    }
+                    hoveredFeatureId = e.features[0].id;
+                    map.setFeatureState(
+                        { source: 'address_layer', sourceLayer: 'Short_Address', id: hoveredFeatureId },
+                        { hover: true }
+                    );
+                }
+            });
+
+            // Reset hover state on mouseout
+            map.on('mouseout', 'address-3d', () => {
+                // Reset cursor
+                map.getCanvas().style.cursor = '';
+
+                // Reset hover state
+                if (hoveredFeatureId !== null) {
+                    map.setFeatureState(
+                        { source: 'address_layer', sourceLayer: 'Short_Address', id: hoveredFeatureId },
+                        { hover: false }
+                    );
+                }
+                hoveredFeatureId = null;
+            });
+
+            // Click effect: Show feature information in a popup
+            let currentPopup = null;
+            map.on('click', 'address-3d', (e) => {
+                if (e.features.length > 0) {
+                    const feature = e.features[0];
+                    const properties = feature.properties;
+
+                    // Create a popup content string
+                    const popupContent = `
+                        <strong>Address:</strong> ${properties.ShortAddress || 'N/A'}<br>
+                        <strong>Land Type ID:</strong> ${properties.LandTypeID || 'N/A'}<br>
+                        <strong>Number of Floors:</strong> ${properties.NoOfFloor || 'N/A'}
+                    `;
+                    // Remove the previous popup if it exists
+                    if (currentPopup) {
+                        currentPopup.remove();
+                    }
+                    // Create and display a popup at the clicked location
+                    new maplibregl.Popup()
+                        .setLngLat(e.lngLat)
+                        .setHTML(popupContent)
+                        .addTo(map);
+                }
+            });
+            // map.on('click', 'address-3d', (e) => {
+            //     if (e.features.length > 0) {
+            //         const properties = e.features[0].properties;
+            //         document.getElementById('info').innerHTML = `
+            //             <strong>Address:</strong> ${properties.ShortAddress || 'N/A'}<br>
+            //             <strong>Land Type ID:</strong> ${properties.LandTypeID || 'N/A'}<br>
+            //             <strong>Number of Floors:</strong> ${properties.NoOfFloor || 'N/A'}
+            //         `;
+            //     }
+            // }); 
+        });
+    </script>
+</body>
+</html>

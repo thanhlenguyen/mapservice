@@ -1,0 +1,96 @@
+# Connection keep alive timeout [default: 75]
+keep_alive: 75
+
+# The socket address to bind [default: 0.0.0.0:3000]
+listen_addresses: '0.0.0.0:3000'
+
+# Set TileJSON URL path prefix.
+# This overrides the default of respecting the X-Rewrite-URL header.
+# Only modifies the JSON (TileJSON) returned; Martin's API-URLs remain unchanged.
+# If you need to rewrite URLs, please use a reverse proxy.
+# Must begin with a `/`.
+# Examples: `/`, `/tiles`
+base_path: /tiles
+
+# Number of web server workers
+worker_processes: 8
+
+# Amount of memory (in MB) to use for caching tiles [default: 512, 0 to disable]
+cache_size_mb: 1024
+
+# Which compression should be used if the
+# - client accepts multiple compression formats, and
+# - tile source is not pre-compressed.
+#
+# `gzip` is faster, but `brotli` is smaller, and may be faster with caching.
+# Default could be different depending on Martin version.
+preferred_encoding: gzip
+
+# Enable or disable Martin web UI. [default: disable]
+#
+# At the moment, only allows `enable-for-all`, which enables the web UI for all connections.
+# This may be undesirable in a production environment
+web_ui: enable-for-all
+
+# Advanced monitoring options
+observability:
+  # Configure metrics reported under `/_/metrics`
+  metrics:
+    # Add these labels to every metric
+    # Example: `{ env: prod, server: martin }`
+    add_labels: {}
+
+# CORS Configuration
+#
+# Defaults to `cors: true`, which allows all origins.
+# Sending/Acting on CORS headers can be completely disabled via `cors: false`
+cors: 
+  # Sets the `Access-Control-Allow-Origin` header [default: *]
+  # '*' will use the requests `ORIGIN` header
+  origin: 
+    - "*"
+  # Sets `Access-Control-Max-Age` Header. [default: null]
+  # null means not setting the header for preflight requests
+  max_age: 3600
+
+# Database configuration. This can also be a list of PG configs.
+postgres:
+  # Database connection string.
+  #
+  # You can use environment variables too, for example:
+  # connection_string: $DATABASE_URL
+  # connection_string: ${DATABASE_URL:-postgres://postgres@localhost/db}
+  connection_string: 'postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable'
+  default_srid: 4326
+  # Enable automatic discovery of tables and functions.
+  # Enable automatic discovery of tables
+  auto_publish:
+    tables:
+      # Limit to the topology schema
+      from_schemas:
+        - topology
+      # Define source ID format
+      source_id_format: '{schema}.{table}'
+      # Assume geometry column is named 'geom'
+      id_columns: id
+      clip_geom: true
+      buffer: 64
+      extent: 4096
+      bounds: [38, 20, 47, 27]
+  # Define the tables to be published as vector tile layers.
+  # tables:     
+  #   - table: topology.places
+  #     srid: 4326
+  #     geometry_column: geom
+  #     id_column: id
+  #     minzoom: 0
+  #     maxzoom: 14
+  #     bounds: [-180, -85, 180, 85] 
+
+# ---- Optional: expose the whole DB (only for demo) -------------------------
+#  all_tables:
+#    type: postgis
+#    uri: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable"
+#    schema: public
+
+# ---- Server tuning ---------------------------------------------------------

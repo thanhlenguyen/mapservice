@@ -1,0 +1,12 @@
+# Ignore large data files or folders
+data/
+tileserver/fonts/
+tileserver/sprites/
+env/
+*.zip
+*.tar.gz
+*.rar
+*.csv
+*.mbtiles
+*.geojson
+*.pbf
