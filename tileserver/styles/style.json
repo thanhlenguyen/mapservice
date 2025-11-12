@@ -1,6 +1,6 @@
 {
   "version": 8,
-  "name": "Riyadh MBTiles + Dynamic POIs",
+  "name": "Base Map Style",
   "metadata": {"maputnik:renderer": "mlgljs"},
   "center": [46.6753, 24.7136],
   "zoom": 10,
@@ -241,7 +241,7 @@
       },
       "paint": {
         "line-opacity": 1,
-        "line-color": "#E2905E",
+        "line-color": "#DAB69F",
         "line-width": {"stops": [[5, 1], [13, 4], [20, 32]], "base": 1}
       }
     },
@@ -258,7 +258,7 @@
       },
       "paint": {
         "line-opacity": 1,
-        "line-color": "#E2905E",
+        "line-color": "#DAB69F",
         "line-width": {"stops": [[12, 0.5], [14, 2], [18, 18]], "base": 1}
       }
     },
@@ -277,7 +277,7 @@
       ],
       "paint": {
         "line-opacity": 1,
-        "line-color": "#E2905E",
+        "line-color": "#DAB69F",
         "line-width": {"stops": [[12, 0.5], [14, 2], [18, 10]]}
       }
     },
@@ -334,29 +334,13 @@
       }
     },
     {
-      "id": "address-3d",
-      "type": "fill-extrusion",
+      "id": "ShortAddress",
+      "type": "fill",
       "source": "address_layer",
       "source-layer": "Short_Address",
       "minzoom": 14,
       "layout": {"visibility": "visible"},
-      "paint": {
-        "fill-extrusion-height": [
-          "case",
-          [
-            "any",
-            ["==", ["get", "LandTypeID"], 5001],
-            ["==", ["get", "LandTypeID"], 8001],
-            ["==", ["get", "LandTypeID"], 7002]
-          ],
-          0,
-          ["==", ["get", "NoOfFloor"], null],
-          4,
-          ["*", ["get", "NoOfFloor"], 3]
-        ],
-        "fill-extrusion-color": "#f8f9e6",
-        "fill-extrusion-opacity": 0.75
-      }
+      "paint": {"fill-color": "#DFE0D5", "fill-outline-color": "#BEBBBB"}
     },
     {
       "id": "address-label",
