@@ -3,14 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dynamic and Static Tile Viewer</title>
+    <title>KSA Route Planner</title>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        tailwind.config = {
-            theme: { extend: { fontFamily: { sans: ['Inter', 'sans-serif'] } } }
-        }
+        tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'sans-serif'] } } } }
     </script>
 
     <!-- MapLibre GL JS -->
@@ -18,142 +16,266 @@
     <link href='https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.css' rel='stylesheet' />
 
     <style>
-        #map { position:absolute; top:0; bottom:0; width:100%; height:100%; }
-        .maplibregl-ctrl-layer-switcher { background:white; }
+        body { margin:0; overflow:hidden; }
+        #map { position:absolute; top:0; bottom:0; width:100%; }
+        .marker { background:#10b981; color:white; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; box-shadow:0 4px 10px rgba(0,0,0,0.3); }
+        .marker-end { background:#ef4444; }
     </style>
 </head>
+<body>
 
-<body class="font-sans antialiased overflow-hidden">
+<div id="map"></div>
 
-    <div id="map" class="shadow-lg"></div>
+<!-- Header -->
+<div class="fixed top-4 left-1/2 -translate-x-1/2 z-10 bg-white px-6 py-4 rounded-2xl shadow-2xl border border-blue-100 text-center">
+    <h1 class="text-2xl font-bold text-gray-800">KSA Route Planner</h1>
+    <p class="text-sm text-gray-600 mt-1">Click map to set <span class="text-green-600 font-bold">Start</span> → <span class="text-red-600 font-bold">End</span></p>
+</div>
 
-    <!-- Header -->
-    <div class="fixed top-4 left-1/2 -translate-x-1/2 z-10 bg-white p-3 rounded-xl shadow-2xl border border-blue-100">
-        <h1 class="text-lg font-bold text-gray-800">Map Visualization</h1>
-        <p class="text-sm text-gray-600">Loading map style from <code class="bg-gray-100 p-1 rounded">http://localhost:8080</code></p>
-    </div>
+<!-- Instructions & Result -->
+<div id="info-box" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-10 bg-white px-6 py-4 rounded-xl shadow-2xl border border-gray-200 text-center hidden">
+    <p class="text-lg font-semibold text-gray-800" id="route-info">Calculating route...</p>
+</div>
 
-    <!-- ----------------------  LAYER SWITCHER  ---------------------- -->
-    <script>
-        // ---------- 1. Define the three styles ----------
-        const STYLES = [
-            { id: 'basic-style',name: 'Default',   url: 'http://localhost:8080/styles/basic-style/style.json', pitch: 0, zoom: 10, bearing: 0 },
-            { id: 'sat-style',  name: 'Satellite', url: 'http://localhost:8080/styles/sat-style/style.json', pitch: 0, zoom: 10, bearing: 0 },
-            { id: '3d-style',   name: '3D',        url: 'http://localhost:8080/styles/3d-style/style.json', pitch: 45, zoom: 13, bearing: 0 }
-        ];
+<script>
+    // ========== STYLES ==========
+    const STYLES = [
+        { id: 'basic-style', name: 'Default',   url: 'http://localhost:8080/styles/basic-style/style.json', pitch: 0, zoom: 10 },
+        { id: 'sat-style',   name: 'Satellite', url: 'http://localhost:8080/styles/sat-style/style.json', pitch: 0, zoom: 10 },
+        { id: '3d-style',    name: '3D',         url: 'http://localhost:8080/styles/3d-style/style.json', pitch: 45, zoom: 14 }
+    ];
 
-        // ---------- 2. Track current view to preserve user navigation ----------
-        let currentCenter = [46.6753, 24.7136];
-        let currentZoom = 10;
-        let currentPitch = 0;
-        let currentBearing = 0;
+    let currentCenter = [46.6167, 24.8258]; // Riyadh
+    let currentZoom = 12;
+    let currentPitch = 0;
+    let currentBearing = 0;
 
-        // ---------- 3. Initialize map ----------
-        let map;
-        function initMap() {
-            map = new maplibregl.Map({
-                container: 'map',
-                style: STYLES[0].url,
-                center: currentCenter,
-                zoom: currentZoom,
-                pitch: currentPitch,
-                bearing: currentBearing,
-                maxPitch: 85
-            });
+    let map;
+    let startMarker = null;
+    let endMarker = null;
+    let currentRouteData = null;
 
-            // Update current view on move
-            map.on('moveend', () => {
-                currentCenter = map.getCenter();
-                currentZoom = map.getZoom();
-                currentPitch = map.getPitch();
-                currentBearing = map.getBearing();
-            });
+    function initMap() {
+        map = new maplibregl.Map({
+            container: 'map',
+            style: STYLES[0].url,
+            center: currentCenter,
+            zoom: currentZoom,
+            pitch: currentPitch,
+            bearing: currentBearing,
+            maxPitch: 85
+        });
 
-            map.addControl(new maplibregl.NavigationControl(), 'top-right');
+        map.on('moveend', () => {
+            currentCenter = map.getCenter();
+            currentZoom = map.getZoom();
+            currentPitch = map.getPitch();
+            currentBearing = map.getBearing();
+        });
 
-            map.on('load', () => {
-                console.log('Map loaded with style:', STYLES[0].name);
-                applyViewForStyle(STYLES[0]); // apply default view
-            });
+        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+        map.addControl(createLayerSwitcher(), 'bottom-right');
 
-            map.on('error', e => showErrorMessage('MapLibre error: ' + (e.error?.message || e.error)));
-        }
+        map.on('click', (e) => {
+            const lngLat = e.lngLat;
 
-        // ---------- 4. Apply view settings for a given style ----------
-        function applyViewForStyle(style) {
-            map.easeTo({
-                center: currentCenter,
-                zoom: style.zoom ?? currentZoom,
-                pitch: style.pitch,
-                bearing: style.bearing ?? currentBearing,
-                duration: 1000,        // smooth 1-second transition
-                easing: t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
-            });
-        }
+            if (!startMarker) {
+                // First click = Start
+                startMarker = new maplibregl.Marker({ element: createMarker('S', '#10b981') })
+                    .setLngLat(lngLat)
+                    .addTo(map);
+                showInfo("Start set. Now click destination");
+            } else if (!endMarker) {
+                // Second click = End
+                endMarker = new maplibregl.Marker({ element: createMarker('E', '#ef4444') })
+                    .setLngLat(lngLat)
+                    .addTo(map);
+                calculateRoute(startMarker.getLngLat(), endMarker.getLngLat());
+            } else {
+                // Third click = Reset
+                clearRoute();
+                startMarker = null;
+                endMarker = null;
+                currentRouteData = null;
+                showInfo("Click to set start point");
+            }
+        });
 
-        // ---------- 5. Layer Switcher Control ----------
-        class LayerSwitcherControl {
-            onAdd(map) {
-                this._map = map;
-                this._container = document.createElement('div');
-                this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+        map.on('load', () => showInfo("Click anywhere to set start point"));
+    }
 
-                STYLES.forEach((s, idx) => {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'maplibregl-ctrl-icon w-10 h-10 flex items-center justify-center text-sm font-medium border-b border-gray-200 hover:bg-gray-100';
-                    btn.title = s.name;
-                    btn.textContent = s.name === '3D' ? '3D' : s.name.charAt(0);
-                    btn.dataset.styleId = s.id;
+    function createMarker(text, bgColor) {
+        const el = document.createElement('div');
+        el.className = 'marker';
+        el.style.backgroundColor = bgColor;
+        el.textContent = text;
+        return el;
+    }
 
-                    if (idx === 0) btn.classList.add('bg-blue-100');
+    function showInfo(text) {
+        document.getElementById('info-box').classList.remove('hidden');
+        document.getElementById('route-info').textContent = text;
+    }
 
-                    btn.addEventListener('click', () => {
-                        // Update active button
-                        this._container.querySelectorAll('button').forEach(b => b.classList.remove('bg-blue-100'));
-                        btn.classList.add('bg-blue-100');
+    function calculateRoute(start, end) {
+        showInfo("Calculating fastest route...");
 
-                        // Load new style
-                        map.setStyle(s.url);
+        // Use relative path to go through Nginx proxy
+        fetch(`/api/route?start_lon=${start.lng}&start_lat=${start.lat}&end_lon=${end.lng}&end_lat=${end.lat}`)
+            .then(async r => {
+                const contentType = r.headers.get('content-type');
+                
+                // Check if we got HTML instead of JSON
+                if (contentType && contentType.includes('text/html')) {
+                    const text = await r.text();
+                    console.error('Received HTML instead of JSON:', text.substring(0, 200));
+                    throw new Error('API returned HTML - check Nginx routing and API status');
+                }
+                
+                if (!r.ok) {
+                    const text = await r.text();
+                    console.error('API error:', text);
+                    throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+                }
+                
+                return r.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    showInfo("Error: " + data.error);
+                    console.error("Routing error:", data.error);
+                    return;
+                }
 
-                        // Once new style loads, apply its view settings
-                        map.once('styledata', () => {
-                            applyViewForStyle(s);
-                            console.log(`Switched to ${s.name} with pitch: ${s.pitch}`);
-                        });
-                    });
+                // Store route data for style switching
+                currentRouteData = data;
 
-                    this._container.appendChild(btn);
+                // Remove old route if exists
+                if (map.getLayer('route')) map.removeLayer('route');
+                if (map.getSource('route')) map.removeSource('route');
+
+                // Add new route
+                map.addSource('route', {
+                    type: 'geojson',
+                    data: data
                 });
 
-                return this._container;
+                map.addLayer({
+                    id: 'route',
+                    type: 'line',
+                    source: 'route',
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: {
+                        'line-color': '#3b82f6',
+                        'line-width': 8,
+                        'line-opacity': 0.9
+                    }
+                });
+
+                // Fit map to route
+                const bounds = new maplibregl.LngLatBounds();
+                data.features.forEach(f => {
+                    if (f.geometry && f.geometry.coordinates) {
+                        f.geometry.coordinates.forEach(coord => bounds.extend(coord));
+                    }
+                });
+                map.fitBounds(bounds, { padding: 80, maxZoom: 15, duration: 1500 });
+
+                // Calculate distance
+                let totalDistance = 0;
+                data.features.forEach(f => {
+                    if (f.geometry && f.geometry.coordinates) {
+                        const coords = f.geometry.coordinates;
+                        for (let i = 0; i < coords.length - 1; i++) {
+                            totalDistance += calculateDistance(coords[i], coords[i + 1]);
+                        }
+                    }
+                });
+
+                // Show result
+                const mins = data.duration_minutes ? Math.round(data.duration_minutes) : '??';
+                const km = totalDistance > 0 ? (totalDistance / 1000).toFixed(1) : '??';
+                showInfo(`Route ready – ${mins} min (~${km} km)`);
+            })
+            .catch(err => {
+                console.error("Fetch error:", err);
+                showInfo("Error connecting to routing server. Check console for details.");
+            });
+    }
+
+    // Haversine distance calculation
+    function calculateDistance(coord1, coord2) {
+        const R = 6371e3; // Earth radius in meters
+        const φ1 = coord1[1] * Math.PI / 180;
+        const φ2 = coord2[1] * Math.PI / 180;
+        const Δφ = (coord2[1] - coord1[1]) * Math.PI / 180;
+        const Δλ = (coord2[0] - coord1[0]) * Math.PI / 180;
+
+        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                  Math.cos(φ1) * Math.cos(φ2) *
+                  Math.sin(Δλ/2) * Math.sin(Δλ/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+        return R * c;
+    }
+
+    function clearRoute() {
+        if (map.getLayer('route')) map.removeLayer('route');
+        if (map.getSource('route')) map.removeSource('route');
+        if (startMarker) startMarker.remove();
+        if (endMarker) endMarker.remove();
+        showInfo("Route cleared. Click to start again");
+    }
+
+    // Layer Switcher
+    function createLayerSwitcher() {
+        class LayerSwitcher {
+            onAdd(map) {
+                this.map = map;
+                this.container = document.createElement('div');
+                this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group flex flex-col';
+
+                STYLES.forEach(style => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'px-4 py-3 text-sm font-medium hover:bg-gray-100 border-b border-gray-200';
+                    btn.textContent = style.name;
+                    btn.onclick = () => {
+                        map.setStyle(style.url);
+                        map.once('styledata', () => {
+                            // Re-add route layer after style change if route exists
+                            if (currentRouteData) {
+                                map.addSource('route', {
+                                    type: 'geojson',
+                                    data: currentRouteData
+                                });
+                                map.addLayer({
+                                    id: 'route',
+                                    type: 'line',
+                                    source: 'route',
+                                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                                    paint: { 
+                                        'line-color': '#3b82f6', 
+                                        'line-width': 8,
+                                        'line-opacity': 0.9
+                                    }
+                                });
+                            }
+                            map.easeTo({ pitch: style.pitch, zoom: style.zoom || currentZoom });
+                        });
+                    };
+                    this.container.appendChild(btn);
+                });
+                return this.container;
             }
-
-            onRemove() {
-                this._container.parentNode.removeChild(this._container);
-            }
+            onRemove() { this.container.parentNode.removeChild(this.container); }
         }
+        return new LayerSwitcher();
+    }
 
-        // ---------- 6. Start everything ----------
-        window.onload = () => {
-            initMap();
-            map.addControl(new LayerSwitcherControl(), 'bottom-right');
-        };
+    // Start
+    window.onload = initMap;
+</script>
 
-        // ---------- 7. Error overlay (unchanged) ----------
-        function showErrorMessage(message) {
-            const container = document.getElementById('map');
-            const errorBox = document.createElement('div');
-            errorBox.className = 'fixed inset-0 bg-red-500 bg-opacity-90 flex items-center justify-center p-6 z-50';
-            errorBox.innerHTML = `
-                <div class="bg-white p-8 rounded-lg shadow-xl max-w-lg text-center">
-                    <h2 class="text-2xl font-bold text-red-600 mb-4">Connection Error</h2>
-                    <p class="text-gray-700 mb-6">${message}</p>
-                    <p class="text-sm text-gray-500">Check Docker containers (tileserver-gl on :8080).</p>
-                </div>
-            `;
-            container.appendChild(errorBox);
-        }
-    </script>
 </body>
 </html>

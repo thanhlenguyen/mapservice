@@ -2,7 +2,7 @@
 
 services:
   postgis:
-    image: postgis/postgis:16-3.4          # stable, recent version
+    image: pgrouting/pgrouting:16-3.5-3.8               # PostGIS with pgRouting       
     container_name: postgis_db
     restart: unless-stopped
     env_file:
@@ -16,6 +16,7 @@ services:
     volumes:
       - vsol:/var/lib/postgresql/data
       - ./data:/data                     # for CSV import later
+    shm_size: 1g  # ← ADD THIS LINE (1GB shared memory)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -48,6 +49,23 @@ services:
       - ./data/mbtiles:/data/mbtiles:ro  # mbtiles files
     command: --config /tileserver/config.json --verbose
 
+  routing-api:
+    image: python:3.12-slim
+    container_name: routing-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"  # Expose if direct access; else proxy via Nginx
+    volumes:
+      - ./routing-api:/app  # Create this folder
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt && python app.py"
+    depends_on:
+      postgis:
+        condition: service_healthy
+        
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: pgadmin4

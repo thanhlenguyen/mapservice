@@ -654,7 +654,7 @@ Options:
 ```
 - Import Shapefile (Similar command):
 ```
-bashogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" \
+ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" \
 -nln topology.places -nlt PROMOTE_TO_MULTI -lco GEOMETRY_NAME=geom \
 /mnt/d/Git/mapserver/data/sample.shp
 ```
@@ -670,7 +670,7 @@ If you have a CSV (e.g., pois.csv with columns name, lat, lon):
 ALTER TABLE topology.places ADD COLUMN geom GEOMETRY(Point, 4326);
 UPDATE topology.places SET geom = ST_SetSRID(ST_MakePoint(lon, lat), 4326);
 ```
-Run ogr2ogr in Docker:
+Run `ogr2ogr` in Host:
 
 If GDAL isn’t installed locally:
 ```
@@ -918,3 +918,536 @@ server {
 - Serve via simple HTTP: 
 
 Test: Visit http://localhost:3001. 
+
+## Phase 5: Optimize Route with street data
+
+### Step 13: Data preparation
+1. Custom data
+- With unclean data, we need to clean in QGIS first: the workflow to clean street for route optimisation as:
+```
+✔ Fix geometries
+✔ Snap lines
+✔ Fix geometries again if needed
+✔ Detect intersections
+✔ Clean duplicates
+✔ Split lines at intersections
+✔ (Optional) Reproject / measure / clean small segments
+```
+- We can use Model Designer in QGIS to automate process
+![alt text](image.png)
+
+2. Or Download & Import KSA Data
+- Download and extract street shapefile to your project `data` folder
+Download: [Saudi Arabia Roads (OSM Export)](https://data.humdata.org/dataset/hotosm_sau_roads) – ZIP with Shapefiles (~100 MB).
+
+3. Import to PostGIS (runs on host, connects to your container)
+- Use ogr2ogr to import data
+```
+ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" -nln topology.ways_raw -nlt PROMOTE_TO_MULTI -overwrite -lco GEOMETRY_NAME=geom /mnt/d/Git/mapserver/data/streets_riyadh.geojson
+```
+- In QGIS, we can use `Database -> DB Manager` to connect with PostgreSQL to import data
+  
+### Step 14: Enable pgRouting Extension 
+- To create extension `pgrouting` we need to config a bit in docker-compose.yml
+```
+postgis:
+    image: pgrouting/pgrouting:16-3.5-3.7               # PostGIS with pgRouting       
+    container_name: postgis_db
+```
+- Access pgAdmin at http://localhost:5050 (login with your .env creds). Connect to postgis_db, then run:
+```
+CREATE EXTENSION IF NOT EXISTS pgrouting;
+```
+### Step 15: Build Routing Topology (Run Once via pgAdmin/psql)
+Connect to your DB and Execute these commands in order (via pgAdmin or psql): (adapts to OSM tags; handles missing width/direction with defaults):
+1. Create DB + enable extensions
+```
+-- run as postgres superuser
+CREATE DATABASE routing_db;
+\c routing_db
+
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS pgrouting;
+```
+
+2. Prepare a working edges table
+
+If you have a shapefile, import it (e.g. ogr2ogr or shp2pgsql) into ways_raw. Then create a copy we’ll work on:
+
+- Insert data have been cleaned topology in GIS apps (QGIS), it is faster and easier to monitoring process
+```
+-- assume ways_raw(geom) exists in 4326
+-- 1. Clean ways table
+DROP TABLE IF EXISTS topology.ways CASCADE;
+CREATE TABLE topology.ways AS
+WITH cleaned AS (
+    SELECT
+        row_number() OVER () AS id,
+        
+        CASE
+            WHEN subtype = 2 THEN 120
+            WHEN subtype = 1 THEN 100
+            WHEN subtype = 3 THEN 90
+            WHEN subtype = 4 THEN 70
+            WHEN subtype = 5 THEN 60
+            WHEN subtype = 6 THEN 40
+            WHEN subtype = 7 THEN 5
+            ELSE 30
+        END AS speed_kmh,
+	-- oneway logic
+    CASE
+        WHEN streetcent =1  OR streetfowi = 1 
+        THEN true
+        ELSE false
+    END AS is_oneway,
+        ST_SetSRID(ST_GeometryN(ST_CollectionExtract(ST_LineMerge(ST_MakeValid(geom)), 2 ), 1 ), 4326
+        ) AS geom
+    FROM topology.ways_raw
+    WHERE geom IS NOT NULL
+      AND ST_GeometryType(geom) != 'ST_Point'
+)
+SELECT id, speed_kmh, is_oneway, geom
+		, ST_Length(ST_Transform(geom, 3857))::double precision AS length_m --Snapping tolerances and length calculations are much easier and safer in meters.
+		, NULL::bigint AS source
+        , NULL::bigint AS target
+		, NULL::bigint AS cost
+        , NULL::bigint AS reverse_cost
+FROM cleaned
+WHERE geom IS NOT NULL
+  AND ST_GeometryType(geom) = 'ST_LineString'
+  AND ST_NPoints(geom) >= 2;
+```
+-- Create index:
+```
+ALTER TABLE topology.ways ADD PRIMARY KEY (id);
+CREATE INDEX ways_gix ON topology.ways USING GIST (geom);
+```
+
+3. Create vertices table with pgr_extractVertices()
+
+pgr_extractVertices() will extract vertices and create a vertices_table that you can use to set source/target. Example workflow (projected geometry):
+```
+-- Run pgr_extractVertices on the projected geometry (use the projected table and column name)
+DROP TABLE IF EXISTS topology.vertices CASCADE;  
+SELECT * INTO topology.vertices FROM pgr_extractVertices('SELECT id, geom FROM topology.ways');
+```
+Creates vertices (with id, geom columns) listing unique nodes, and populates in_edges and out_edges. Then update back soure and target in ways 
+
+4. Update source and target 
+```
+-- set the source information 
+UPDATE topology.ways AS w
+SET source = v.id 
+FROM topology.vertices AS v
+WHERE ST_StartPoint(w.geom) = v.geom;
+
+-- set the target information 
+UPDATE topology.ways AS w
+SET target = v.id 
+FROM topology.vertices AS v
+WHERE ST_EndPoint(w.geom) = v.geom;
+
+-- Update or Add missing indexes on source/target (very important!)
+CREATE INDEX IF NOT EXISTS ways_source_idx ON topology.ways(source);
+CREATE INDEX IF NOT EXISTS ways_target_idx ON topology.ways(target);
+```
+5. Calculate length, cost, reverse_cost
+```
+UPDATE topology.ways SET
+  cost = length_m / (speed_kmh * 1000.0 / 3600.0),
+  reverse_cost = CASE 
+    WHEN is_oneway THEN -1 
+    ELSE length_m / (speed_kmh * 1000.0 / 3600.0) 
+  END;
+```
+
+6. Vacuum/analyze
+```
+VACUUM ANALYZE topology.ways;
+VACUUM ANALYZE topology.vertices;
+```
+
+7.  Quick validation (connected components / debugging)
+
+Check for isolated components (useful to find broken geometry):
+```
+SELECT * FROM pgr_connectedComponents('
+  SELECT id, source, target, cost, reverse_cost FROM topology.ways'
+  );
+```
+
+If you need to filter to a connected subgraph for routing, you can use pgr_connectedComponents to find major components and work on the largest.
+### Step 16: Add Routing API to docker-compose.yml
+- Append this service to your `services:` section (uses your `.env` for DB):
+```
+  routing-api:
+    image: python:3.12-slim
+    container_name: routing-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"  # Expose if direct access; else proxy via Nginx
+    volumes:
+      - ./routing-api:/app  # Create this folder
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt && python app.py"
+    depends_on:
+      postgis:
+        condition: service_healthy
+```
+- Create `./routing-api/requirements.txt`
+```
+# In your routing-api folder
+psycopg2-binary
+flask
+flask-cors
+```
+- Create `./routing-api/app.py` (same as before, with your DB vars):
+```
+# app.py — FIXED VERSION
+from flask import Flask, request, jsonify
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import os
+import json
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+
+# Database connection
+def get_db_connection():
+    return psycopg2.connect(
+        host=os.getenv("POSTGRES_HOST", "postgis"),
+        database=os.getenv("POSTGRES_DB", "geodb"),
+        user=os.getenv("POSTGRES_USER", "le"),
+        password=os.getenv("POSTGRES_PASSWORD", "123456"),
+        port=5432
+    )
+
+@app.route('/health', methods=['GET'])
+def health():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.close()
+        conn.close()
+        return jsonify({"status": "healthy", "db": "connected"}), 200
+    except Exception as e:
+        return jsonify({"status": "unhealthy", "error": str(e)}), 500
+
+@app.route('/route', methods=['GET'])
+def get_route():
+    try:
+        start_lon = float(request.args.get('start_lon'))
+        start_lat = float(request.args.get('start_lat'))
+        end_lon = float(request.args.get('end_lon'))
+        end_lat = float(request.args.get('end_lat'))
+
+        if None in (start_lon, start_lat, end_lon, end_lat):
+            return jsonify({"error": "Missing coordinates"}), 400
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # 1. Find nearest start and end vertices
+        cur.execute("""
+            WITH start_pt AS (SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geometry AS geom),
+                 end_pt   AS (SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geometry AS geom)
+            SELECT 
+                (SELECT id FROM topology.vertices 
+                 ORDER BY geom <-> (SELECT geom FROM start_pt) LIMIT 1) AS start_vid,
+                (SELECT id FROM topology.vertices 
+                 ORDER BY geom <-> (SELECT geom FROM end_pt) LIMIT 1) AS end_vid,
+                (SELECT ST_Distance(geom, (SELECT geom FROM start_pt)) 
+                 FROM topology.vertices 
+                 ORDER BY geom <-> (SELECT geom FROM start_pt) LIMIT 1) AS start_distance,
+                (SELECT ST_Distance(geom, (SELECT geom FROM end_pt)) 
+                 FROM topology.vertices 
+                 ORDER BY geom <-> (SELECT geom FROM end_pt) LIMIT 1) AS end_distance;
+        """, (start_lon, start_lat, end_lon, end_lat))
+        
+        nodes = cur.fetchone()
+        start_vid = nodes['start_vid']
+        end_vid = nodes['end_vid']
+        start_distance = nodes['start_distance']
+        end_distance = nodes['end_distance']
+
+        # Check if points are too far from network (>0.1 degrees ≈ 11km)
+        if start_distance > 0.1 or end_distance > 0.1:
+            return jsonify({
+                "error": "Points too far from road network",
+                "start_distance_deg": round(start_distance, 4),
+                "end_distance_deg": round(end_distance, 4),
+                "hint": "Your coordinates may be outside the loaded map area"
+            }), 404
+
+        if not start_vid or not end_vid:
+            return jsonify({"error": "Could not snap to network"}), 404
+
+        # 2. Run pgr_dijkstra
+        cur.execute("""
+            SELECT seq, node, edge, cost, agg_cost
+            FROM pgr_dijkstra(
+                'SELECT id, source, target, cost, reverse_cost 
+                 FROM topology.ways 
+                 WHERE cost > 0',
+                %s, %s, directed => true
+            )
+            ORDER BY seq;
+        """, (start_vid, end_vid))
+
+        path = cur.fetchall()
+
+        if not path or path[-1]['node'] != end_vid:
+            return jsonify({"error": "No route found"}), 404
+
+        # 3. Extract edge IDs
+        edge_ids = [row['edge'] for row in path if row['edge'] != -1]
+
+        # 4. Fetch geometry
+        if edge_ids:
+            cur.execute("""
+                SELECT id, ST_AsGeoJSON(geom) AS geojson, length_m
+                FROM topology.ways
+                WHERE id = ANY(%s)
+                ORDER BY ARRAY_POSITION(%s, id);
+            """, (edge_ids, edge_ids))
+            segments = cur.fetchall()
+        else:
+            segments = []
+
+        # 5. Build response - FIX: Parse GeoJSON string
+        features = []
+        for seg in segments:
+            features.append({
+                "type": "Feature",
+                "geometry": json.loads(seg['geojson']),  # ← FIXED: Parse JSON string
+                "properties": {
+                    "id": seg['id'],
+                    "length_m": round(seg['length_m'], 2)
+                }
+            })
+
+        total_cost = path[-1]['agg_cost'] if path else 0
+        total_distance = sum(seg['length_m'] for seg in segments) if segments else 0
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "type": "FeatureCollection",
+            "features": features,
+            "total_distance_km": round(total_distance / 1000, 3),
+            "duration_minutes": round(total_cost / 60, 1),
+            "segment_count": len(features),
+            "start_vertex": int(start_vid),
+            "end_vertex": int(end_vid)
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+```
+
+### Step 17: Proxy via Nginx (Optional but Recommended)
+- Add to your `./nginx.conf` (inside server {}):
+```
+location /api/ {
+        proxy_pass http://routing-api:5000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        
+        # CORS headers
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods 'GET, POST, OPTIONS' always;
+        add_header Access-Control-Allow-Headers 'Content-Type' always;
+        
+        # Handle preflight
+        if ($request_method = OPTIONS) {
+            return 204;
+        }
+    }
+```
+- Restart: `docker compose up -d --build routing-api nginx`
+### Step 18: Test in Your Frontend
+- In your `./frontend/index.html`, add:
+```
+    function initMap() {
+        map = new maplibregl.Map({
+            container: 'map',
+            style: STYLES[0].url,
+            center: currentCenter,
+            zoom: currentZoom,
+            pitch: currentPitch,
+            bearing: currentBearing,
+            maxPitch: 85
+        });
+
+        map.on('moveend', () => {
+            currentCenter = map.getCenter();
+            currentZoom = map.getZoom();
+            currentPitch = map.getPitch();
+            currentBearing = map.getBearing();
+        });
+
+        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+        map.addControl(createLayerSwitcher(), 'bottom-right');
+
+        map.on('click', (e) => {
+            const lngLat = e.lngLat;
+
+            if (!startMarker) {
+                // First click = Start
+                startMarker = new maplibregl.Marker({ element: createMarker('S', '#10b981') })
+                    .setLngLat(lngLat)
+                    .addTo(map);
+                showInfo("Start set. Now click destination");
+            } else if (!endMarker) {
+                // Second click = End
+                endMarker = new maplibregl.Marker({ element: createMarker('E', '#ef4444') })
+                    .setLngLat(lngLat)
+                    .addTo(map);
+                calculateRoute(startMarker.getLngLat(), endMarker.getLngLat());
+            } else {
+                // Third click = Reset
+                clearRoute();
+                startMarker = null;
+                endMarker = null;
+                currentRouteData = null;
+                showInfo("Click to set start point");
+            }
+        });
+
+        map.on('load', () => showInfo("Click anywhere to set start point"));
+    }
+
+    function createMarker(text, bgColor) {
+        const el = document.createElement('div');
+        el.className = 'marker';
+        el.style.backgroundColor = bgColor;
+        el.textContent = text;
+        return el;
+    }
+
+    function showInfo(text) {
+        document.getElementById('info-box').classList.remove('hidden');
+        document.getElementById('route-info').textContent = text;
+    }
+
+    function calculateRoute(start, end) {
+        showInfo("Calculating fastest route...");
+
+        // Use relative path to go through Nginx proxy
+        fetch(`/api/route?start_lon=${start.lng}&start_lat=${start.lat}&end_lon=${end.lng}&end_lat=${end.lat}`)
+            .then(async r => {
+                const contentType = r.headers.get('content-type');
+                
+                // Check if we got HTML instead of JSON
+                if (contentType && contentType.includes('text/html')) {
+                    const text = await r.text();
+                    console.error('Received HTML instead of JSON:', text.substring(0, 200));
+                    throw new Error('API returned HTML - check Nginx routing and API status');
+                }
+                
+                if (!r.ok) {
+                    const text = await r.text();
+                    console.error('API error:', text);
+                    throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+                }
+                
+                return r.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    showInfo("Error: " + data.error);
+                    console.error("Routing error:", data.error);
+                    return;
+                }
+
+                // Store route data for style switching
+                currentRouteData = data;
+
+                // Remove old route if exists
+                if (map.getLayer('route')) map.removeLayer('route');
+                if (map.getSource('route')) map.removeSource('route');
+
+                // Add new route
+                map.addSource('route', {
+                    type: 'geojson',
+                    data: data
+                });
+
+                map.addLayer({
+                    id: 'route',
+                    type: 'line',
+                    source: 'route',
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: {
+                        'line-color': '#3b82f6',
+                        'line-width': 8,
+                        'line-opacity': 0.9
+                    }
+                });
+
+                // Fit map to route
+                const bounds = new maplibregl.LngLatBounds();
+                data.features.forEach(f => {
+                    if (f.geometry && f.geometry.coordinates) {
+                        f.geometry.coordinates.forEach(coord => bounds.extend(coord));
+                    }
+                });
+                map.fitBounds(bounds, { padding: 80, maxZoom: 15, duration: 1500 });
+
+                // Calculate distance
+                let totalDistance = 0;
+                data.features.forEach(f => {
+                    if (f.geometry && f.geometry.coordinates) {
+                        const coords = f.geometry.coordinates;
+                        for (let i = 0; i < coords.length - 1; i++) {
+                            totalDistance += calculateDistance(coords[i], coords[i + 1]);
+                        }
+                    }
+                });
+
+                // Show result
+                const mins = data.duration_minutes ? Math.round(data.duration_minutes) : '??';
+                const km = totalDistance > 0 ? (totalDistance / 1000).toFixed(1) : '??';
+                showInfo(`Route ready – ${mins} min (~${km} km)`);
+            })
+            .catch(err => {
+                console.error("Fetch error:", err);
+                showInfo("Error connecting to routing server. Check console for details.");
+            });
+    }
+
+    // Haversine distance calculation
+    function calculateDistance(coord1, coord2) {
+        const R = 6371e3; // Earth radius in meters
+        const φ1 = coord1[1] * Math.PI / 180;
+        const φ2 = coord2[1] * Math.PI / 180;
+        const Δφ = (coord2[1] - coord1[1]) * Math.PI / 180;
+        const Δλ = (coord2[0] - coord1[0]) * Math.PI / 180;
+
+        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                  Math.cos(φ1) * Math.cos(φ2) *
+                  Math.sin(Δλ/2) * Math.sin(Δλ/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+        return R * c;
+    }
+
+    function clearRoute() {
+        if (map.getLayer('route')) map.removeLayer('route');
+        if (map.getSource('route')) map.removeSource('route');
+        if (startMarker) startMarker.remove();
+        if (endMarker) endMarker.remove();
+        showInfo("Route cleared. Click to start again");
+    }
+```
