@@ -50,10 +50,7 @@
     "Administrative": {
       "mbtiles": "Administrative.mbtiles"
     },
-    "Administrative_label": {
-      "mbtiles": "Administrative_label.mbtiles"
-    },
-    "City_District_Zone": {
+      "City_District_Zone": {
       "mbtiles": "City_District_Zone.mbtiles"
     },
     "address_layer": {

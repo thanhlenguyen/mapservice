@@ -11,10 +11,9 @@
       "tileSize": 256,
       "attribution": "© CARTO"
     },
-    "administrative": {"type": "vector", "url": "mbtiles://Administrative"},
-    "administrative_label": {
+      "administrative": {
       "type": "vector",
-      "url": "mbtiles://Administrative_label"
+      "url": "mbtiles://Administrative"
     },
     "city_district_zone": {
       "type": "vector",
@@ -75,7 +74,7 @@
     {
       "id": "emirate-label",
       "type": "symbol",
-      "source": "administrative_label",
+      "source": "administrative",
       "source-layer": "Emirate_Label",
       "minzoom": 4,
       "maxzoom": 16,
@@ -121,7 +120,7 @@
     {
       "id": "governorate-label",
       "type": "symbol",
-      "source": "administrative_label",
+      "source": "administrative",
       "source-layer": "Governorate_Label",
       "minzoom": 7,
       "maxzoom": 16,
@@ -385,7 +384,7 @@
       "source-layer": "topology.places",
       "minzoom": 14,
       "layout": {
-        "icon-image": ["concat", ["get", "maki"], "_11"],
+        "icon-image": ["concat", ["get", "osm_icon"], "_11"],
         "icon-size": 1,
         "icon-allow-overlap": true,
         "text-field": ["get", "name"],

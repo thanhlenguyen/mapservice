@@ -1,0 +1,4 @@
+# In your routing-api folder
+psycopg2-binary
+flask
+flask-cors
