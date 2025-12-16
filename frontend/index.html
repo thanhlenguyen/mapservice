@@ -3,279 +3,65 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KSA Route Planner</title>
+    <title>KSA Route & Service Analysis</title>
 
-    <!-- Tailwind CSS -->
+    <!-- Tailwind CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'sans-serif'] } } } }
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] }
+                }
+            }
+        }
     </script>
 
     <!-- MapLibre GL JS -->
     <script src='https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.js'></script>
     <link href='https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.css' rel='stylesheet' />
 
-    <style>
-        body { margin:0; overflow:hidden; }
-        #map { position:absolute; top:0; bottom:0; width:100%; }
-        .marker { background:#10b981; color:white; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; box-shadow:0 4px 10px rgba(0,0,0,0.3); }
-        .marker-end { background:#ef4444; }
-    </style>
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-<div id="map"></div>
+    <div id="map"></div>
 
-<!-- Header -->
-<div class="fixed top-4 left-1/2 -translate-x-1/2 z-10 bg-white px-6 py-4 rounded-2xl shadow-2xl border border-blue-100 text-center">
-    <h1 class="text-2xl font-bold text-gray-800">KSA Route Planner</h1>
-    <p class="text-sm text-gray-600 mt-1">Click map to set <span class="text-green-600 font-bold">Start</span> → <span class="text-red-600 font-bold">End</span></p>
-</div>
+    <!-- Header with Mode Switcher -->
+    <div class="fixed top-4 left-1/2 -translate-x-1/2 z-10 bg-white px-6 py-4 rounded-2xl shadow-2xl border border-blue-100">
+        <div class="flex items-center gap-4">
+            <h1 class="text-xl font-bold text-gray-800">KSA Analysis Tool</h1>
+            <div class="flex bg-gray-100 rounded-lg p-1">
+                <button id="mode-route" class="px-3 py-2 text-xs font-medium rounded-md bg-blue-600 text-white transition">
+                    🗺️ A→B Route
+                </button>
+                <button id="mode-tsp" class="px-3 py-2 text-xs font-medium rounded-md hover:bg-gray-200 transition">
+                    🔄 TSP Multi
+                </button>
+                <button id="mode-crime" class="px-3 py-2 text-xs font-medium rounded-md hover:bg-gray-200 transition">
+                    🚚 Service Area
+                </button>
+            </div>
+        </div>
+        <p class="text-sm text-gray-600 mt-2" id="mode-instruction">
+            Click: <span class="text-green-600 font-bold">Start</span> → <span class="text-red-600 font-bold">End</span>
+        </p>
+    </div>
 
-<!-- Instructions & Result -->
-<div id="info-box" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-10 bg-white px-6 py-4 rounded-xl shadow-2xl border border-gray-200 text-center hidden">
-    <p class="text-lg font-semibold text-gray-800" id="route-info">Calculating route...</p>
-</div>
+    <!-- Time Slider (only visible in service mode) -->
+    <div id="time-slider" class="fixed top-28 left-1/2 -translate-x-1/2 z-10 bg-white px-6 py-3 rounded-xl shadow-xl border border-gray-200 hidden">
+        <label class="text-sm font-semibold text-gray-700">Service Time: <span id="time-value">5</span> min</label>
+        <input type="range" id="time-input" min="1" max="15" value="5" step="1" 
+               class="w-64 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer mt-2">
+    </div>
 
-<script>
-    // ========== STYLES ==========
-    const STYLES = [
-        { id: 'basic-style', name: 'Default',   url: 'http://localhost:8080/styles/basic-style/style.json', pitch: 0, zoom: 10 },
-        { id: 'sat-style',   name: 'Satellite', url: 'http://localhost:8080/styles/sat-style/style.json', pitch: 0, zoom: 10 },
-        { id: '3d-style',    name: '3D',         url: 'http://localhost:8080/styles/3d-style/style.json', pitch: 45, zoom: 14 }
-    ];
+    <!-- Info Box -->
+    <div id="info-box" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-10 bg-white px-6 py-4 rounded-xl shadow-2xl border border-gray-200 text-center hidden">
+        <p class="text-base text-gray-800" id="route-info">Click to start</p>
+    </div>
 
-    let currentCenter = [46.6167, 24.8258]; // Riyadh
-    let currentZoom = 12;
-    let currentPitch = 0;
-    let currentBearing = 0;
-
-    let map;
-    let startMarker = null;
-    let endMarker = null;
-    let currentRouteData = null;
-
-    function initMap() {
-        map = new maplibregl.Map({
-            container: 'map',
-            style: STYLES[0].url,
-            center: currentCenter,
-            zoom: currentZoom,
-            pitch: currentPitch,
-            bearing: currentBearing,
-            maxPitch: 85
-        });
-
-        map.on('moveend', () => {
-            currentCenter = map.getCenter();
-            currentZoom = map.getZoom();
-            currentPitch = map.getPitch();
-            currentBearing = map.getBearing();
-        });
-
-        map.addControl(new maplibregl.NavigationControl(), 'top-right');
-        map.addControl(createLayerSwitcher(), 'bottom-right');
-
-        map.on('click', (e) => {
-            const lngLat = e.lngLat;
-
-            if (!startMarker) {
-                // First click = Start
-                startMarker = new maplibregl.Marker({ element: createMarker('S', '#10b981') })
-                    .setLngLat(lngLat)
-                    .addTo(map);
-                showInfo("Start set. Now click destination");
-            } else if (!endMarker) {
-                // Second click = End
-                endMarker = new maplibregl.Marker({ element: createMarker('E', '#ef4444') })
-                    .setLngLat(lngLat)
-                    .addTo(map);
-                calculateRoute(startMarker.getLngLat(), endMarker.getLngLat());
-            } else {
-                // Third click = Reset
-                clearRoute();
-                startMarker = null;
-                endMarker = null;
-                currentRouteData = null;
-                showInfo("Click to set start point");
-            }
-        });
-
-        map.on('load', () => showInfo("Click anywhere to set start point"));
-    }
-
-    function createMarker(text, bgColor) {
-        const el = document.createElement('div');
-        el.className = 'marker';
-        el.style.backgroundColor = bgColor;
-        el.textContent = text;
-        return el;
-    }
-
-    function showInfo(text) {
-        document.getElementById('info-box').classList.remove('hidden');
-        document.getElementById('route-info').textContent = text;
-    }
-
-    function calculateRoute(start, end) {
-        showInfo("Calculating fastest route...");
-
-        // Use relative path to go through Nginx proxy
-        fetch(`/api/route?start_lon=${start.lng}&start_lat=${start.lat}&end_lon=${end.lng}&end_lat=${end.lat}`)
-            .then(async r => {
-                const contentType = r.headers.get('content-type');
-                
-                // Check if we got HTML instead of JSON
-                if (contentType && contentType.includes('text/html')) {
-                    const text = await r.text();
-                    console.error('Received HTML instead of JSON:', text.substring(0, 200));
-                    throw new Error('API returned HTML - check Nginx routing and API status');
-                }
-                
-                if (!r.ok) {
-                    const text = await r.text();
-                    console.error('API error:', text);
-                    throw new Error(`HTTP ${r.status}: ${r.statusText}`);
-                }
-                
-                return r.json();
-            })
-            .then(data => {
-                if (data.error) {
-                    showInfo("Error: " + data.error);
-                    console.error("Routing error:", data.error);
-                    return;
-                }
-
-                // Store route data for style switching
-                currentRouteData = data;
-
-                // Remove old route if exists
-                if (map.getLayer('route')) map.removeLayer('route');
-                if (map.getSource('route')) map.removeSource('route');
-
-                // Add new route
-                map.addSource('route', {
-                    type: 'geojson',
-                    data: data
-                });
-
-                map.addLayer({
-                    id: 'route',
-                    type: 'line',
-                    source: 'route',
-                    layout: { 'line-join': 'round', 'line-cap': 'round' },
-                    paint: {
-                        'line-color': '#3b82f6',
-                        'line-width': 8,
-                        'line-opacity': 0.9
-                    }
-                });
-
-                // Fit map to route
-                const bounds = new maplibregl.LngLatBounds();
-                data.features.forEach(f => {
-                    if (f.geometry && f.geometry.coordinates) {
-                        f.geometry.coordinates.forEach(coord => bounds.extend(coord));
-                    }
-                });
-                map.fitBounds(bounds, { padding: 80, maxZoom: 15, duration: 1500 });
-
-                // Calculate distance
-                let totalDistance = 0;
-                data.features.forEach(f => {
-                    if (f.geometry && f.geometry.coordinates) {
-                        const coords = f.geometry.coordinates;
-                        for (let i = 0; i < coords.length - 1; i++) {
-                            totalDistance += calculateDistance(coords[i], coords[i + 1]);
-                        }
-                    }
-                });
-
-                // Show result
-                const mins = data.duration_minutes ? Math.round(data.duration_minutes) : '??';
-                const km = totalDistance > 0 ? (totalDistance / 1000).toFixed(1) : '??';
-                showInfo(`Route ready – ${mins} min (~${km} km)`);
-            })
-            .catch(err => {
-                console.error("Fetch error:", err);
-                showInfo("Error connecting to routing server. Check console for details.");
-            });
-    }
-
-    // Haversine distance calculation
-    function calculateDistance(coord1, coord2) {
-        const R = 6371e3; // Earth radius in meters
-        const φ1 = coord1[1] * Math.PI / 180;
-        const φ2 = coord2[1] * Math.PI / 180;
-        const Δφ = (coord2[1] - coord1[1]) * Math.PI / 180;
-        const Δλ = (coord2[0] - coord1[0]) * Math.PI / 180;
-
-        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                  Math.cos(φ1) * Math.cos(φ2) *
-                  Math.sin(Δλ/2) * Math.sin(Δλ/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-
-        return R * c;
-    }
-
-    function clearRoute() {
-        if (map.getLayer('route')) map.removeLayer('route');
-        if (map.getSource('route')) map.removeSource('route');
-        if (startMarker) startMarker.remove();
-        if (endMarker) endMarker.remove();
-        showInfo("Route cleared. Click to start again");
-    }
-
-    // Layer Switcher
-    function createLayerSwitcher() {
-        class LayerSwitcher {
-            onAdd(map) {
-                this.map = map;
-                this.container = document.createElement('div');
-                this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group flex flex-col';
-
-                STYLES.forEach(style => {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'px-4 py-3 text-sm font-medium hover:bg-gray-100 border-b border-gray-200';
-                    btn.textContent = style.name;
-                    btn.onclick = () => {
-                        map.setStyle(style.url);
-                        map.once('styledata', () => {
-                            // Re-add route layer after style change if route exists
-                            if (currentRouteData) {
-                                map.addSource('route', {
-                                    type: 'geojson',
-                                    data: currentRouteData
-                                });
-                                map.addLayer({
-                                    id: 'route',
-                                    type: 'line',
-                                    source: 'route',
-                                    layout: { 'line-join': 'round', 'line-cap': 'round' },
-                                    paint: { 
-                                        'line-color': '#3b82f6', 
-                                        'line-width': 8,
-                                        'line-opacity': 0.9
-                                    }
-                                });
-                            }
-                            map.easeTo({ pitch: style.pitch, zoom: style.zoom || currentZoom });
-                        });
-                    };
-                    this.container.appendChild(btn);
-                });
-                return this.container;
-            }
-            onRemove() { this.container.parentNode.removeChild(this.container); }
-        }
-        return new LayerSwitcher();
-    }
-
-    // Start
-    window.onload = initMap;
-</script>
-
+    <!-- Custom Script -->
+    <script src="script.js" defer></script>
 </body>
 </html>

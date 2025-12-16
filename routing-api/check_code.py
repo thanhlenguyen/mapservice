@@ -1,4 +1,4 @@
-# app.py — Current VERSION
+# app.py — Complete Route + TSP + Crime Escape Analysis
 from flask import Flask, request, jsonify
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -9,7 +9,6 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# Database connection
 def get_db_connection():
     return psycopg2.connect(
         host=os.getenv("POSTGRES_HOST", "postgis"),
@@ -43,10 +42,7 @@ def get_route():
         Body: {"points": [[lon, lat], [lon, lat], ...]}
     """
     try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        # Determine if simple or TSP routing
+        # POST method - TSP routing
         if request.method == 'POST':
             data = request.get_json()
             points = data.get('points', [])
@@ -54,112 +50,120 @@ def get_route():
             if not points or len(points) < 2:
                 return jsonify({"error": "Need at least 2 points for TSP"}), 400
             
-            return solve_tsp(cur, conn, points)
+            return solve_tsp(points)
         
-        else:  # GET - simple A to B
-            start_lon = float(request.args.get('start_lon'))
-            start_lat = float(request.args.get('start_lat'))
-            end_lon = float(request.args.get('end_lon'))
-            end_lat = float(request.args.get('end_lat'))
+        # GET method - simple A to B routing
+        start_lon = float(request.args.get('start_lon'))
+        start_lat = float(request.args.get('start_lat'))
+        end_lon = float(request.args.get('end_lon'))
+        end_lat = float(request.args.get('end_lat'))
 
-            if None in (start_lon, start_lat, end_lon, end_lat):
-                return jsonify({"error": "Missing coordinates"}), 400
+        if None in (start_lon, start_lat, end_lon, end_lat):
+            return jsonify({"error": "Missing coordinates"}), 400
 
-            # Find nearest vertices
-            cur.execute("""
-                WITH start_pt AS (SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geometry AS geom),
-                     end_pt   AS (SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geometry AS geom)
-                SELECT 
-                    (SELECT id FROM topology.vertices 
-                     ORDER BY geom <-> (SELECT geom FROM start_pt) LIMIT 1) AS start_vid,
-                    (SELECT id FROM topology.vertices 
-                     ORDER BY geom <-> (SELECT geom FROM end_pt) LIMIT 1) AS end_vid,
-                    (SELECT ST_Distance(geom, (SELECT geom FROM start_pt)) 
-                     FROM topology.vertices 
-                     ORDER BY geom <-> (SELECT geom FROM start_pt) LIMIT 1) AS start_distance,
-                    (SELECT ST_Distance(geom, (SELECT geom FROM end_pt)) 
-                     FROM topology.vertices 
-                     ORDER BY geom <-> (SELECT geom FROM end_pt) LIMIT 1) AS end_distance;
-            """, (start_lon, start_lat, end_lon, end_lat))
-            
-            nodes = cur.fetchone()
-            start_vid = nodes['start_vid']
-            end_vid = nodes['end_vid']
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
 
-            if nodes['start_distance'] > 0.1 or nodes['end_distance'] > 0.1:
-                return jsonify({
-                    "error": "Points too far from road network",
-                    "hint": "Click within the mapped area"
-                }), 404
+        # Find nearest vertices
+        cur.execute("""
+            WITH start_pt AS (SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geometry AS geom),
+                 end_pt   AS (SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geometry AS geom)
+            SELECT 
+                (SELECT id FROM topology.vertices 
+                 ORDER BY geom <-> (SELECT geom FROM start_pt) LIMIT 1) AS start_vid,
+                (SELECT id FROM topology.vertices 
+                 ORDER BY geom <-> (SELECT geom FROM end_pt) LIMIT 1) AS end_vid,
+                (SELECT ST_Distance(geom, (SELECT geom FROM start_pt)) 
+                 FROM topology.vertices 
+                 ORDER BY geom <-> (SELECT geom FROM start_pt) LIMIT 1) AS start_distance,
+                (SELECT ST_Distance(geom, (SELECT geom FROM end_pt)) 
+                 FROM topology.vertices 
+                 ORDER BY geom <-> (SELECT geom FROM end_pt) LIMIT 1) AS end_distance;
+        """, (start_lon, start_lat, end_lon, end_lat))
+        
+        nodes = cur.fetchone()
+        start_vid = nodes['start_vid']
+        end_vid = nodes['end_vid']
 
-            if not start_vid or not end_vid:
-                return jsonify({"error": "Could not snap to network"}), 404
-
-            # Run simple routing
-            cur.execute("""
-                SELECT seq, node, edge, cost, agg_cost
-                FROM pgr_dijkstra(
-                    'SELECT id, source, target, cost, reverse_cost 
-                     FROM topology.ways 
-                     WHERE cost > 0',
-                    %s, %s, directed => true
-                )
-                ORDER BY seq;
-            """, (start_vid, end_vid))
-
-            path = cur.fetchall()
-
-            if not path or path[-1]['node'] != end_vid:
-                return jsonify({"error": "No route found"}), 404
-
-            edge_ids = [row['edge'] for row in path if row['edge'] != -1]
-
-            if edge_ids:
-                cur.execute("""
-                    SELECT id, ST_AsGeoJSON(geom) AS geojson, length_m
-                    FROM topology.ways
-                    WHERE id = ANY(%s)
-                    ORDER BY ARRAY_POSITION(%s, id);
-                """, (edge_ids, edge_ids))
-                segments = cur.fetchall()
-            else:
-                segments = []
-
-            features = []
-            for seg in segments:
-                features.append({
-                    "type": "Feature",
-                    "geometry": json.loads(seg['geojson']),
-                    "properties": {
-                        "id": seg['id'],
-                        "length_m": round(seg['length_m'], 2)
-                    }
-                })
-
-            total_cost = path[-1]['agg_cost'] if path else 0
-            total_distance = sum(seg['length_m'] for seg in segments) if segments else 0
-
-            cur.close()
-            conn.close()
-
+        if nodes['start_distance'] > 0.1 or nodes['end_distance'] > 0.1:
             return jsonify({
-                "type": "FeatureCollection",
-                "features": features,
-                "total_distance_km": round(total_distance / 1000, 2),
-                "duration_minutes": round(total_cost / 60, 1),
-                "segment_count": len(features),
-                "start_vertex": int(start_vid),
-                "end_vertex": int(end_vid)
+                "error": "Points too far from road network",
+                "hint": "Click within the mapped area"
+            }), 404
+
+        if not start_vid or not end_vid:
+            return jsonify({"error": "Could not snap to network"}), 404
+
+        # Run simple routing
+        cur.execute("""
+            SELECT seq, node, edge, cost, agg_cost
+            FROM pgr_dijkstra(
+                'SELECT id, source, target, cost, reverse_cost 
+                 FROM topology.ways 
+                 WHERE cost > 0',
+                %s, %s, directed => true
+            )
+            ORDER BY seq;
+        """, (start_vid, end_vid))
+
+        path = cur.fetchall()
+
+        if not path or path[-1]['node'] != end_vid:
+            return jsonify({"error": "No route found"}), 404
+
+        edge_ids = [row['edge'] for row in path if row['edge'] != -1]
+
+        if edge_ids:
+            cur.execute("""
+                SELECT id, ST_AsGeoJSON(geom) AS geojson, length_m
+                FROM topology.ways
+                WHERE id = ANY(%s)
+                ORDER BY ARRAY_POSITION(%s, id);
+            """, (edge_ids, edge_ids))
+            segments = cur.fetchall()
+        else:
+            segments = []
+
+        features = []
+        for seg in segments:
+            features.append({
+                "type": "Feature",
+                "geometry": json.loads(seg['geojson']),
+                "properties": {
+                    "id": seg['id'],
+                    "length_m": round(seg['length_m'], 2)
+                }
             })
+
+        total_cost = path[-1]['agg_cost'] if path else 0
+        total_distance = sum(seg['length_m'] for seg in segments) if segments else 0
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "type": "FeatureCollection",
+            "features": features,
+            "total_distance_km": round(total_distance / 1000, 2),
+            "duration_minutes": round(total_cost / 60, 1),
+            "segment_count": len(features),
+            "start_vertex": int(start_vid),
+            "end_vertex": int(end_vid)
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-def solve_tsp(cur, conn, points):
+def solve_tsp(points):
     """
     Solve Traveling Salesman Problem using pgr_TSP
     """
+    conn = None
+    cur = None
     try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
         # 1. Snap all points to nearest vertices
         vertex_ids = []
         for i, (lon, lat) in enumerate(points):
@@ -182,65 +186,94 @@ def solve_tsp(cur, conn, points):
             return jsonify({"error": "Need at least 2 valid points"}), 400
 
         # 2. Build cost matrix between all points
-        vertex_pairs = []
-        for i, start_v in enumerate(vertex_ids):
-            for j, end_v in enumerate(vertex_ids):
-                if i != j:
-                    vertex_pairs.append((i, j, start_v, end_v))
-
-        # Create temporary table for cost matrix
         cur.execute("DROP TABLE IF EXISTS temp_cost_matrix;")
         cur.execute("""
             CREATE TEMP TABLE temp_cost_matrix (
-                start_vid INTEGER,
-                end_vid INTEGER,
-                agg_cost FLOAT
+                source BIGINT,
+                target BIGINT,
+                cost FLOAT
             );
         """)
 
         # Calculate costs between all pairs
-        for i, j, start_v, end_v in vertex_pairs:
-            cur.execute("""
-                INSERT INTO temp_cost_matrix (start_vid, end_vid, agg_cost)
-                SELECT %s, %s, 
-                    COALESCE(
-                        (SELECT agg_cost 
-                         FROM pgr_dijkstra(
-                             'SELECT id, source, target, cost, reverse_cost 
-                              FROM topology.ways WHERE cost > 0',
-                             %s, %s, directed => true
-                         )
-                         ORDER BY seq DESC LIMIT 1
-                        ), 999999
-                    );
-            """, (start_v, end_v, start_v, end_v))
+        for start_v in vertex_ids:
+            for end_v in vertex_ids:
+                if start_v != end_v:
+                    cur.execute("""
+                        INSERT INTO temp_cost_matrix (source, target, cost)
+                        SELECT %s, %s, 
+                            COALESCE(
+                                (SELECT agg_cost 
+                                 FROM pgr_dijkstra(
+                                     'SELECT id, source, target, cost, reverse_cost 
+                                      FROM topology.ways WHERE cost > 0',
+                                     %s, %s, directed => true
+                                 )
+                                 ORDER BY seq DESC LIMIT 1
+                                ), 999999
+                            );
+                    """, (start_v, end_v, start_v, end_v))
 
         conn.commit()
 
-        # 3. Solve TSP
+        # 3. Solve TSP - Open tour (no return to start)
+        # We'll use pgr_dijkstraCost to build matrix and solve manually
+        # Or use pgr_TSP with end_id specified
+        
+        # Build distance matrix
         cur.execute("""
-            SELECT seq, node, cost, agg_cost
-            FROM pgr_TSP(
-                'SELECT start_vid, end_vid, agg_cost FROM temp_cost_matrix'
-            )
-            ORDER BY seq;
-        """, (vertex_ids[0],))
+            SELECT start_vid AS source, end_vid AS target, agg_cost AS cost
+            FROM pgr_dijkstraCostMatrix(
+                'SELECT id, source, target, cost, reverse_cost 
+                 FROM topology.ways WHERE cost > 0',
+                ARRAY[%s],
+                directed := true
+            );
+        """, (vertex_ids,))
+        
+        cost_matrix = cur.fetchall()
+        
+        if not cost_matrix:
+            return jsonify({"error": "Could not build cost matrix"}), 404
 
-        tsp_path = cur.fetchall()
+        # Use greedy nearest neighbor for open TSP
+        visited = [0]  # Start with first point
+        current = vertex_ids[0]
+        
+        while len(visited) < len(vertex_ids):
+            # Find nearest unvisited point
+            min_cost = float('inf')
+            next_idx = None
+            
+            for i, vid in enumerate(vertex_ids):
+                if i not in visited:
+                    # Get cost from current to this point
+                    cur.execute("""
+                        SELECT agg_cost FROM temp_cost_matrix
+                        WHERE source = %s AND target = %s;
+                    """, (current, vid))
+                    result = cur.fetchone()
+                    if result and result['agg_cost'] < min_cost:
+                        min_cost = result['agg_cost']
+                        next_idx = i
+            
+            if next_idx is not None:
+                visited.append(next_idx)
+                current = vertex_ids[next_idx]
+            else:
+                break
 
-        if not tsp_path:
-            return jsonify({"error": "Could not solve TSP"}), 404
+        waypoint_order = visited
 
-        # 4. Get detailed route for each segment
+        # 4. Get detailed route for each segment following the optimal order
         all_edges = []
-        waypoint_order = []
         segment_info = []
 
-        for i in range(len(tsp_path) - 1):
-            start_v = tsp_path[i]['node']
-            end_v = tsp_path[i + 1]['node']
-            
-            waypoint_order.append(vertex_ids.index(start_v))
+        for i in range(len(waypoint_order) - 1):
+            start_idx = waypoint_order[i]
+            end_idx = waypoint_order[i + 1]
+            start_v = vertex_ids[start_idx]
+            end_v = vertex_ids[end_idx]
 
             # Get edges for this segment
             cur.execute("""
@@ -259,14 +292,12 @@ def solve_tsp(cur, conn, points):
             segment_cost = sum(e['cost'] for e in segment_edges)
             
             all_edges.extend(edge_ids)
+            
             segment_info.append({
-                "from_point": vertex_ids.index(start_v),
-                "to_point": vertex_ids.index(end_v),
+                "from_point": start_idx + 1,
+                "to_point": end_idx + 1,
                 "cost_seconds": round(segment_cost, 1)
             })
-
-        # Add final point
-        waypoint_order.append(vertex_ids.index(tsp_path[-1]['node']))
 
         # 5. Fetch geometries
         if all_edges:
@@ -290,7 +321,8 @@ def solve_tsp(cur, conn, points):
                 }
             })
 
-        total_cost = tsp_path[-1]['agg_cost'] if tsp_path else 0
+        # Calculate totals
+        total_cost = sum(info['cost_seconds'] for info in segment_info)
         total_distance = sum(seg['length_m'] for seg in segments) if segments else 0
 
         cur.close()
@@ -303,21 +335,24 @@ def solve_tsp(cur, conn, points):
             "duration_minutes": round(total_cost / 60, 1),
             "segment_count": len(features),
             "waypoint_count": len(points),
-            "waypoint_order": waypoint_order,
+            "waypoint_order": [x + 1 for x in waypoint_order],
             "segment_info": segment_info,
-            "optimization": "TSP"
+            "optimization": "TSP (Open Tour - No Return)"
         })
 
     except Exception as e:
-        conn.rollback()
-        cur.close()
-        conn.close()
+if conn:
+            conn.rollback()
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
         return jsonify({"error": str(e)}), 500
 
 @app.route('/route_hull', methods=['GET'])
 def get_route_with_concave_hull():
     """
-    Returns route + concave hull (area of interest) around the route
+    Route with concave hull (area of interest)
     """
     try:
         start_lon = float(request.args.get('start_lon'))
@@ -331,7 +366,7 @@ def get_route_with_concave_hull():
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
-        # 1. Find nearest vertices with distance check
+        # Find nearest vertices
         cur.execute("""
             WITH start_pt AS (SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geometry AS geom),
                  end_pt   AS (SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geometry AS geom)
@@ -348,15 +383,12 @@ def get_route_with_concave_hull():
         end_vid = nodes['end_vid']
 
         if nodes['start_dist'] > 0.1 or nodes['end_dist'] > 0.1:
-            return jsonify({
-                "error": "Points too far from road network",
-                "hint": "Click within the mapped area"
-            }), 404
+            return jsonify({"error": "Points too far from road network"}), 404
 
         if not start_vid or not end_vid:
             return jsonify({"error": "Cannot snap to network"}), 404
 
-        # 2. Single optimized query for route + concave hull
+        # Single query for route + hull
         cur.execute("""
             WITH route_edges AS (
                 SELECT 
@@ -438,9 +470,6 @@ def get_route_with_concave_hull():
 def escape_area():
     """
     Crime escape analysis - reachable road network from a crime location
-    Input:
-        lon, lat  → crime point
-        minutes   → time budget (defaults to 5)
     """
     try:
         lon = float(request.args.get("lon"))
@@ -477,7 +506,7 @@ def escape_area():
                 "distance_deg": round(v["dist"], 4)
             }), 404
 
-        # Run driving-distance (time-based reachability)
+        # Run driving-distance
         cur.execute("""
             WITH reach AS (
                 SELECT node, edge, cost, agg_cost
@@ -486,7 +515,7 @@ def escape_area():
                      FROM topology.ways 
                      WHERE cost > 0',
                     %s,
-                    %s * 60,    -- minutes → seconds
+                    %s * 60,
                     directed := false
                 )
             ),

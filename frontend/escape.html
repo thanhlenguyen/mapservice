@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Escape Route Isochrone App</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-sA+4Jf2R1jzG36xyh4C0hZQzQAtF5pP3pbbf2Wv+z0g="
+    crossorigin=""
+  />
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+    }
+    #map {
+      height: 100vh;
+      width: 100vw;
+    }
+    #panel {
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      background: white;
+      padding: 12px;
+      border-radius: 8px;
+      z-index: 9999;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+    }
+    #panel input, #panel button {
+      margin-top: 5px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="panel">
+    <div><b>Escape Route Isochrone</b></div>
+    <label>Max Distance (meters)</label>
+    <input type="number" id="maxdist" value="1500" />
+    <button id="calcBtn">Calculate Isochrone</button>
+    <div id="status" style="margin-top:6px;color:#444;font-size:13px;"></div>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o9N1j7kCzG7v8aNDO5pYIYF8jLZ1y26w2i1F4xcp4m="
+    crossorigin=""
+  ></script>
+
+  <script>
+    // Initialize Map (Riyadh center)
+    const map = L.map("map").setView([24.7136, 46.6753], 12);
+
+    // Basemap
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+    }).addTo(map);
+
+    let crimeMarker = null;
+    let isoLayer = null;
+    let crimePoint = null;
+
+    map.on("click", function (e) {
+      crimePoint = e.latlng;
+
+      if (crimeMarker) map.removeLayer(crimeMarker);
+
+      crimeMarker = L.marker(crimePoint).addTo(map);
+      document.getElementById("status").innerHTML =
+        "Crime location selected: " +
+        crimePoint.lat.toFixed(5) +
+        ", " +
+        crimePoint.lng.toFixed(5);
+    });
+
+    document.getElementById("calcBtn").onclick = async function () {
+      const dist = document.getElementById("maxdist").value;
+
+      if (!crimePoint) {
+        alert("Click on the map to choose crime location.");
+        return;
+      }
+
+      document.getElementById("status").innerHTML = "Processing…";
+
+      try {
+        // TODO: Replace with your backend URL
+        const API_URL = "http://localhost:8000/isochrone";
+
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lon: crimePoint.lng,
+            lat: crimePoint.lat,
+            max_distance: Number(dist),
+          }),
+        });
+
+        const geojson = await response.json();
+
+        if (isoLayer) map.removeLayer(isoLayer);
+
+        isoLayer = L.geoJSON(geojson, {
+          style: { color: "red", weight: 2, fillOpacity: 0.2 },
+        }).addTo(map);
+
+        document.getElementById("status").innerHTML =
+          "Isochrone area loaded.";
+      } catch (err) {
+        console.error(err);
+        document.getElementById("status").innerHTML =
+          "Error loading isochrone.";
+      }
+    };
+  </script>
+</body>
+</html>

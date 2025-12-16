@@ -29,8 +29,8 @@
       "maxzoom": 22
     }
   },
-  "sprite": "https://openmaptiles.github.io/osm-bright-gl-style/sprite",
-  "glyphs": "http://localhost:8080/fonts/{fontstack}/{range}.pbf",
+  "sprite": "sprite",
+  "glyphs": "fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
       "id": "osm-base",
@@ -175,7 +175,7 @@
       "source": "city_district_zone",
       "source-layer": "CityCenter",
       "minzoom": 11,
-      "layout": {"icon-image": "border-dot-13"},
+      "layout": {"icon-image": "circle_11"},
       "paint": {"icon-opacity": 1, "icon-color": "#000000"}
     },
     {

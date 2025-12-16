@@ -3,6 +3,9 @@ data/
 tileserver/fonts/
 tileserver/sprites/
 env/
+k8s/
+k8s-converted/
+k8s-tileserver/
 *.zip
 *.tar.gz
 *.rar
