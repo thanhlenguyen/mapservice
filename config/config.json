@@ -2,9 +2,9 @@
   "options": {
     "paths": {
       "root": "/tileserver",
+      "styles": "styles",
       "fonts": "fonts",
       "sprites": "sprites",
-      "styles": "styles",
       "mbtiles": "/data/mbtiles"
     },
     "domains": [

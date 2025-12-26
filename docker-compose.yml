@@ -32,7 +32,10 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./martin-config.yml:/config.yml:ro
+      - ./config/martin-config.yml:/config.yml:ro # Martin config file (Martin reads martin-config.yml as config.yml)
+      - ./data/mbtiles:/mbtiles:ro # MBTiles files (for Martin to serve when we use Martin to render Mbtiles)
+      - ./data/pmtiles:/pmtiles:ro # PMTiles files (for Martin to serve when we use Martin to render PMTiles)
+      - ./styles/martin:/styles:ro  # Mapbox style JSON files (for Martin to serve when we use Martin to render Mbtiles)
     depends_on:
       postgis:
         condition: service_healthy
@@ -45,9 +48,22 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./tileserver:/tileserver:ro       # config.json + styles/
-      - ./data/mbtiles:/data/mbtiles:ro  # mbtiles files
+      - ./config/config.json:/tileserver/config.json:ro       # config.json 
+      - ./styles/tileserver:/tileserver/styles:ro # styles for Tileserver-GL       
+      - ./data/fonts:/tileserver/fonts:ro      # Raw .ttf/.otf files for Martin to generate glyphs
+      - ./data/sprites:/tileserver/sprites:ro  # Individual SVG/PNG files for Martin to generate sprites     
+      - ./data/mbtiles:/data/mbtiles:ro  # mbtiles files 
     command: --config /tileserver/config.json --verbose
+
+  # go-pmtiles:
+  #   image: protomaps/go-pmtiles:latest   # official image, very small & fast
+  #   container_name: go_pmtiles
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8081:8080"                      # map host:9000 → container:8080
+  #   volumes:
+  #     - ./data/pmtiles/address_layer.pmtiles:/data.pmtiles:ro          # mount your pmtiles folder read-only
+  #   command: serve /data.pmtiles --port=8080 --cache-size=512
 
   routing-api:
     image: python:3.12-slim
@@ -87,8 +103,12 @@ services:
     ports:
       - "3001:80"
     volumes:
-      - ./frontend:/usr/share/nginx/html:ro
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend:/usr/share/nginx/html
+      - ./data/pmtiles:/usr/share/nginx/html/pmtiles:ro # serve PMTiles files when using PMTiles directly in frontend (serverless method)
+      - ./data/sprites:/usr/share/nginx/html/sprites:ro   # serve sprites
+      - ./data/fonts:/usr/share/nginx/html/fonts:ro       # serve fonts  
+      - ./styles:/usr/share/nginx/html/styles:ro    # serve styles
+      - ./config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - martin
       - tileserver-gl    
