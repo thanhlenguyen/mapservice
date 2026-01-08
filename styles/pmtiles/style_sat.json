@@ -13,6 +13,10 @@
       "tileSize": 256,
       "attribution": "© Esri, Maxar, Earthstar Geographics"
     },
+    "riyadh_satellite": {
+        "type": "raster",
+        "url": "pmtiles://http://localhost:3001/pmtiles/riyadh.pmtiles"
+      },
     "administrative": {
         "type": "vector",
         "url": "pmtiles://http://localhost:3001/pmtiles/administrative.pmtiles"
@@ -49,6 +53,14 @@
       "type": "raster",
       "source": "esri-satellite",
       "minzoom": 0,
+      "maxzoom": 24,
+      "layout": {"visibility": "visible"}
+    },
+    {
+      "id": "riyadh_satellite",
+      "type": "raster",
+      "source": "riyadh_satellite",
+      "minzoom": 12,
       "maxzoom": 24,
       "layout": {"visibility": "visible"}
     },

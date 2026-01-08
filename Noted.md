@@ -123,6 +123,8 @@ Nginx config as below:
 ```
 location /martin/ {
     proxy_pass http://martin_server:3000/;  # Fixed container name
+    ......
+}
 ```
 ## 4. Martin (+Postgis), Go-pmtiles, Nginx (focus on Go-pmtiles) ! Not complete yet
 Go-Pmtiles will serve pmtiles layers in specific folder, so in docker we can configure and mount:

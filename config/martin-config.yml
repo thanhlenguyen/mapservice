@@ -15,7 +15,7 @@ cors:
   max_age: 3600
 
 postgres:
-  connection_string: 'postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable'
+  connection_string: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgis:5432/${POSTGRES_DB}?sslmode=disable"
   default_srid: 4326
   auto_publish:
     tables:
@@ -43,10 +43,7 @@ mbtiles:
   # - /mbtiles
   sources:
     # # named source matching source name to a single file
-    # Administrative: /mbtiles/Administrative.mbtiles
-    # City_District_Zone: /mbtiles/City_District_Zone.mbtiles
-    # address_layer: /mbtiles/address_layer.mbtiles
-    # street_centerline:  /mbtiles/street_centerline.mbtiles
+    riyadh_satellite: /mbtiles/riyadh.mbtiles
 
 sprites:
   cache_size_mb: 64

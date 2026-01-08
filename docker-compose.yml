@@ -55,16 +55,6 @@ services:
       - ./data/mbtiles:/data/mbtiles:ro  # mbtiles files 
     command: --config /tileserver/config.json --verbose
 
-  # go-pmtiles:
-  #   image: protomaps/go-pmtiles:latest   # official image, very small & fast
-  #   container_name: go_pmtiles
-  #   restart: unless-stopped
-  #   ports:
-  #     - "8081:8080"                      # map host:9000 → container:8080
-  #   volumes:
-  #     - ./data/pmtiles/address_layer.pmtiles:/data.pmtiles:ro          # mount your pmtiles folder read-only
-  #   command: serve /data.pmtiles --port=8080 --cache-size=512
-
   routing-api:
     image: python:3.12-slim
     container_name: routing-api

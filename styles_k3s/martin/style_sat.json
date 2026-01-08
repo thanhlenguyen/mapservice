@@ -13,30 +13,44 @@
       "tileSize": 256,
       "attribution": "© Esri, Maxar, Earthstar Geographics"
     },
+    "riyadh_satellite": {
+      "type": "raster",
+      "tiles": ["http://martin.172-17-65-26.nip.io/riyadh/{z}/{x}/{y}"],
+      "minzoom": 12,
+      "maxzoom": 22
+    },
     "administrative": {
-        "type": "vector",
-        "url": "pmtiles://http://localhost:3001/pmtiles/administrative.pmtiles"
-      },
-      "city_district_zone": {
-        "type": "vector",
-        "url": "pmtiles://http://localhost:3001/pmtiles/city_district_zone.pmtiles"
-      },
-      "address_layer": {
-        "type": "vector",
-        "url": "pmtiles://http://localhost:3001/pmtiles/address_layer.pmtiles"
-      },
-      "street_centerline": {
-        "type": "vector",
-        "url": "pmtiles://http://localhost:3001/pmtiles/street_centerline.pmtiles"
-      },
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.nip.io/administrative/{z}/{x}/{y}"],
+      "minzoom": 4,
+      "maxzoom": 12
+    },
+    "city_district_zone": {
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.nip.io/city_district_zone/{z}/{x}/{y}"],
+      "minzoom": 9,
+      "maxzoom": 13
+    },
+    "address_layer": {
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.nip.io/address_layer/{z}/{x}/{y}"],
+      "minzoom": 14,
+      "maxzoom": 15
+    },
+    "street_centerline": {
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.nip.io/street_centerline/{z}/{x}/{y}"],
+      "minzoom": 5,
+      "maxzoom": 15
+    },
     "pois": {
       "type": "vector",
-      "tiles": ["http://localhost:3000/topology.places/{z}/{x}/{y}"],
+      "tiles": ["http://martin.172-17-65-26.nip.io/topology.places/{z}/{x}/{y}"],
       "minzoom": 12,
       "maxzoom": 22
     }
   },
-  "sprite": "sprite",
+  "sprite": "/sprites/sprite",
   "glyphs": "fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
@@ -49,6 +63,14 @@
       "type": "raster",
       "source": "esri-satellite",
       "minzoom": 0,
+      "maxzoom": 24,
+      "layout": {"visibility": "visible"}
+    },
+    {
+      "id": "riyadh_satellite",
+      "type": "raster",
+      "source": "riyadh_satellite",
+      "minzoom": 12,
       "maxzoom": 24,
       "layout": {"visibility": "visible"}
     },

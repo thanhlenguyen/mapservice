@@ -298,7 +298,7 @@
       "filter": ["none", ["==", "Subtype", 1], ["==", "Subtype", 2]],
       "layout": {
         "text-field": ["get", "EnglishName"],
-        "text-font": ["Arial Unicode MS Regular"],
+        "text-font": ["Open Sans Regular"],
         "text-size": {"stops": [[7, 9], [18, 12]]},
         "symbol-placement": "line",
         "text-max-angle": 30,
@@ -324,7 +324,7 @@
       "filter": ["any", ["==", "Subtype", 1], ["==", "Subtype", 2]],
       "layout": {
         "text-field": ["get", "EnglishName"],
-        "text-font": ["Arial Unicode MS Regular"],
+        "text-font": ["Open Sans Regular"],
         "text-size": {"stops": [[7, 12], [18, 16]]},
         "symbol-placement": "line",
         "text-max-angle": 30,

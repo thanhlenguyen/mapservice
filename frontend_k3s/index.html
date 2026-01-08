@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KSA Route & Service Analysis</title>
+
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+
+    <!-- MapLibre GL JS -->
+    <script src='https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.css' rel='stylesheet' />
+
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <!-- Header with Mode Switcher -->
+    <div class="fixed top-4 left-1/2 -translate-x-1/2 z-10 bg-white px-6 py-4 rounded-2xl shadow-2xl border border-blue-100">
+        <div class="flex items-center gap-4">
+            <h1 class="text-xl font-bold text-gray-800">KSA Analysis Tool</h1>
+            <div class="flex bg-gray-100 rounded-lg p-1">
+                <button id="mode-route" class="px-3 py-2 text-xs font-medium rounded-md bg-blue-600 text-white transition">
+                    🗺️ A→B Route
+                </button>
+                <button id="mode-tsp" class="px-3 py-2 text-xs font-medium rounded-md hover:bg-gray-200 transition">
+                    🔄 TSP Multi
+                </button>
+                <button id="mode-crime" class="px-3 py-2 text-xs font-medium rounded-md hover:bg-gray-200 transition">
+                    🚚 Service Area
+                </button>
+            </div>
+        </div>
+        <p class="text-sm text-gray-600 mt-2" id="mode-instruction">
+            Click: <span class="text-green-600 font-bold">Start</span> → <span class="text-red-600 font-bold">End</span>
+        </p>
+    </div>
+
+    <!-- Time Slider (only visible in service mode) -->
+    <div id="time-slider" class="fixed top-28 left-1/2 -translate-x-1/2 z-10 bg-white px-6 py-3 rounded-xl shadow-xl border border-gray-200 hidden">
+        <label class="text-sm font-semibold text-gray-700">Service Time: <span id="time-value">5</span> min</label>
+        <input type="range" id="time-input" min="1" max="15" value="5" step="1" 
+               class="w-64 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer mt-2">
+    </div>
+
+    <!-- Info Box -->
+    <div id="info-box" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-10 bg-white px-6 py-4 rounded-xl shadow-2xl border border-gray-200 text-center hidden">
+        <p class="text-base text-gray-800" id="route-info">Click to start</p>
+    </div>
+
+    <!-- Custom Script -->
+    <script src="js/routing.js" defer></script>
+</body>
+</html>

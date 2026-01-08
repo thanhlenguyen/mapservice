@@ -13,30 +13,39 @@
       "tileSize": 256,
       "attribution": "© Esri, Maxar, Earthstar Geographics"
     },
+    "riyadh_satellite": {
+      "type": "raster", 
+      "url": "mbtiles://riyadh"
+    },
     "administrative": {
-        "type": "vector",
-        "url": "pmtiles://http://localhost:3001/pmtiles/administrative.pmtiles"
-      },
-      "city_district_zone": {
-        "type": "vector",
-        "url": "pmtiles://http://localhost:3001/pmtiles/city_district_zone.pmtiles"
-      },
-      "address_layer": {
-        "type": "vector",
-        "url": "pmtiles://http://localhost:3001/pmtiles/address_layer.pmtiles"
-      },
-      "street_centerline": {
-        "type": "vector",
-        "url": "pmtiles://http://localhost:3001/pmtiles/street_centerline.pmtiles"
-      },
+      "type": "vector", 
+      "url": "mbtiles://Administrative"
+    },
+
+    "city_district_zone": {
+      "type": "vector",
+      "url": "mbtiles://City_District_Zone"
+    },
+
+    "address_layer": {
+      "type": "vector", 
+      "url": "mbtiles://address_layer"
+    },
+
+    "street_centerline": {
+      "type": "vector",
+      "url": "mbtiles://street_centerline"
+    },
+
     "pois": {
       "type": "vector",
-      "tiles": ["http://localhost:3000/topology.places/{z}/{x}/{y}"],
+      "tiles": ["http://martin.172-17-65-26.nip.io/topology.places/{z}/{x}/{y}"],
       "minzoom": 12,
       "maxzoom": 22
     }
   },
-  "sprite": "sprite",
+
+  "sprite": "/sprites/sprite",
   "glyphs": "fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
@@ -49,6 +58,14 @@
       "type": "raster",
       "source": "esri-satellite",
       "minzoom": 0,
+      "maxzoom": 24,
+      "layout": {"visibility": "visible"}
+    },
+    {
+      "id": "riyadh_satellite",
+      "type": "raster",
+      "source": "riyadh_satellite",
+      "minzoom": 12,
       "maxzoom": 24,
       "layout": {"visibility": "visible"}
     },
@@ -405,7 +422,7 @@
           "#b1ff75",
           "#ffffff"
         ],
-        "text-halo-color": "#ffffff",
+        "text-halo-color": "#0a0a0a",
         "text-halo-width": 1,
         "icon-color": "#E1ED08",
         "icon-halo-color": "#B92C2C"
