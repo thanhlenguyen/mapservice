@@ -5,33 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dynamic and Static Tile Viewer</title>
 
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: { extend: { fontFamily: { sans: ['Inter', 'sans-serif'] } } }
-        }
-    </script>
+    <!-- Add your custom CSS -->
+    <link rel="stylesheet" href="css/styles.css">
 
     <!-- MapLibre GL JS -->
     <script src='https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.js'></script>
     <link href='https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.css' rel='stylesheet' />
 
-    <style>
-        #map { position:absolute; top:0; bottom:0; width:100%; height:100%; }
-        .maplibregl-ctrl-layer-switcher { background:white; }
-    </style>
+    <!-- Optional: load Inter font (if not already) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 
-<body class="font-sans antialiased overflow-hidden">
+<body>
+    <div id="map"></div>
 
-    <div id="map" class="shadow-lg"></div>
-
-    <!-- Header -->
-    <div class="fixed top-4 left-1/2 -translate-x-1/2 z-10 bg-white p-3 rounded-xl shadow-2xl border border-blue-100">
-        <h1 class="text-lg font-bold text-gray-800">Map Visualization</h1>
+    <!-- Use semantic class names instead of Tailwind -->
+    <div class="header-container">
+        <h1 class="header-title">Map Visualization</h1>
     </div>
 
-    <script src="js/martin.js" defer> </script>
+    <script src="js/martin.js" defer></script>
 </body>
 </html>

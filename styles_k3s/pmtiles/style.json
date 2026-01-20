@@ -13,29 +13,29 @@
     },
   "administrative": {
       "type": "vector",
-      "url": "pmtiles://http://map.172-17-65-26.nip.io/pmtiles/administrative.pmtiles"
+      "url": "pmtiles://http://map.172-17-65-26.sslip.io/pmtiles/administrative.pmtiles"
     },
     "city_district_zone": {
       "type": "vector",
-      "url": "pmtiles://http://map.172-17-65-26.nip.io/pmtiles/city_district_zone.pmtiles"
+      "url": "pmtiles://http://map.172-17-65-26.sslip.io/pmtiles/city_district_zone.pmtiles"
     },
     "address_layer": {
       "type": "vector",
-      "url": "pmtiles://http://map.172-17-65-26.nip.io/pmtiles/address_layer.pmtiles"
+      "url": "pmtiles://http://map.172-17-65-26.sslip.io/pmtiles/address_layer.pmtiles"
     },
     "street_centerline": {
       "type": "vector",
-      "url": "pmtiles://http://map.172-17-65-26.nip.io/pmtiles/street_centerline.pmtiles"
+      "url": "pmtiles://http://map.172-17-65-26.sslip.io/pmtiles/street_centerline.pmtiles"
     },
     "pois": {
       "type": "vector",
-      "tiles": ["http://martin.172-17-65-26.nip.io/topology.places/{z}/{x}/{y}"],
+      "tiles": ["http://martin.172-17-65-26.sslip.io/topology.places/{z}/{x}/{y}"],
       "minzoom": 12,
       "maxzoom": 22
     }
   },
-  "sprite": "http://map.172-17-65-26.nip.io/sprites/sprite",   
-  "glyphs": "http://map.172-17-65-26.nip.io/fonts/{fontstack}/{range}.pbf",
+  "sprite": "http://map.172-17-65-26.sslip.io/sprites/sprite",   
+  "glyphs": "http://map.172-17-65-26.sslip.io/fonts/{fontstack}/{range}.pbf",
   "layers": [
     
     {

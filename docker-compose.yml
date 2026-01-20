@@ -24,7 +24,7 @@ services:
       retries: 10
 
   martin:
-    image: ghcr.io/maplibre/martin:latest   # official image
+    image: ghcr.io/maplibre/martin:1.2.0   # official image
     container_name: martin_server
     restart: unless-stopped
     env_file:

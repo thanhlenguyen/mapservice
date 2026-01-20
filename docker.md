@@ -676,7 +676,7 @@ If GDAL isn’t installed locally:
 ```
 ogr2ogr:
   image: osgeo/gdal
-  command: ogr2ogr -f PostgreSQL PG:"host=postgis user=le password=123456 dbname=geodb" \
+  command: ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" \
   -nln topology.places -nlt PROMOTE_TO_MULTI -lco GEOMETRY_NAME=geom \
   /data/pois.geojson
   volumes:
@@ -1030,6 +1030,8 @@ pgr_extractVertices() will extract vertices and create a vertices_table that you
 -- Run pgr_extractVertices on the projected geometry (use the projected table and column name)
 DROP TABLE IF EXISTS topology.vertices CASCADE;  
 SELECT * INTO topology.vertices FROM pgr_extractVertices('SELECT id, geom FROM topology.ways');
+-- Create index
+CREATE INDEX idx_vertices_geom_gist ON topology.vertices USING gist (geom);
 ```
 Creates vertices (with id, geom columns) listing unique nodes, and populates in_edges and out_edges. Then update back soure and target in ways 
 
@@ -1451,3 +1453,150 @@ location /api/ {
         showInfo("Route cleared. Click to start again");
     }
 ```
+
+## Phase 6: Addition functions:
+### Nearest Facilities
+#### Step 1: Pre-compute nearest_vertex_id (run once in database)
+Connect to your database and execute:
+```SQL
+-- 0. Add column if not already present
+ALTER TABLE topology.places ADD COLUMN IF NOT EXISTS nearest_vertex_id BIGINT;
+-- 1. Check if GiST index exists on the vertices geometry
+SELECT indexname, indexdef 
+FROM pg_indexes 
+WHERE tablename = 'vertices' 
+  AND schemaname = 'topology'
+  AND indexdef LIKE '%USING gist%';
+
+-- 2. Check if an index exists on the filter column (nearest_vertex_id)
+-- This speeds up finding which rows still need updating
+SELECT indexname, indexdef 
+FROM pg_indexes 
+WHERE tablename = 'places' 
+  AND schemaname = 'topology'
+  AND indexdef LIKE '%nearest_vertex_id%';
+
+-- 3. Update statistics so the planner knows how to use the indexes
+ANALYZE topology.vertices;
+ANALYZE topology.places;
+
+--If the first check returns nothing, you should create the index immediately:
+CREATE INDEX idx_vertices_geom_gist ON topology.vertices USING gist (geom);
+
+-- Compute nearest vertex for EVERY POI (safe to run multiple times)
+UPDATE topology.places p
+SET nearest_vertex_id = (
+    SELECT id 
+    FROM topology.vertices v
+    ORDER BY v.geom <-> p.geom
+    LIMIT 1
+)
+WHERE nearest_vertex_id IS NULL;   -- only compute missing ones. Note: check if using LATERAL is faster for larger dataset
+
+-- Index for fast lookup
+CREATE INDEX IF NOT EXISTS places_nearest_vertex_idx 
+ON topology.places (nearest_vertex_id);
+
+-- Optional: index on type for faster filtering
+CREATE INDEX IF NOT EXISTS places_type_idx ON topology.places (type);
+```
+
+#### Step 2: Updated /api/closest_facility endpoint in app.py
+Replace the previous version (or add this one) with this adapted version that uses topology.places:
+```python
+@app.route('/closest_facility', methods=['GET'])
+def closest_facility():
+    """
+    Find nearest facility/facilities using existing topology.places table
+    Only supports: hospital, fire_station, police at this stage
+    
+    Query params:
+        lon, lat        - location of incident/event
+        type            - 'hospital', 'fire_station', 'police'
+        limit           - how many closest results (default 3)
+        max_minutes     - optional time limit in minutes
+    """
+    try:
+        lon = float(request.args.get('lon'))
+        lat = float(request.args.get('lat'))
+        facility_type = request.args.get('type', 'hospital').lower()
+
+        # Security: only allow supported types for now
+        allowed_types = ['hospital', 'fire_station', 'police']
+        if facility_type not in allowed_types:
+            return jsonify({
+                "error": f"Unsupported facility type. Currently supported: {', '.join(allowed_types)}"
+            }), 400
+
+        limit = int(request.args.get('limit', 3))
+        max_minutes = request.args.get('max_minutes')
+
+        if None in (lon, lat):
+            return jsonify({"error": "Missing lon/lat"}), 400
+
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        query = """
+            SELECT 
+                p.id,
+                p.name,
+                p.type,
+                p.address,
+                round(d.agg_cost::numeric, 1) AS travel_seconds,
+                round(d.agg_cost / 60.0, 1) AS travel_minutes,
+                ST_X(p.geom) AS facility_lon,
+                ST_Y(p.geom) AS facility_lat
+            FROM topology.places p
+            CROSS JOIN LATERAL (
+                SELECT agg_cost
+                FROM pgr_dijkstraCost(
+                    'SELECT id, source, target, cost, reverse_cost 
+                     FROM topology.ways 
+                     WHERE cost > 0',
+                    -- Start: snapped vertex of incident location
+                    (SELECT id FROM topology.vertices 
+                     ORDER BY geom <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326) LIMIT 1),
+                    p.nearest_vertex_id,
+                    directed => true
+                )
+            ) d
+            WHERE p.type = %s
+              AND p.nearest_vertex_id IS NOT NULL
+              AND d.agg_cost IS NOT NULL
+        """
+
+        params = [lat, lon, facility_type]  # lat first for ST_MakePoint!
+
+        if max_minutes:
+            max_seconds = float(max_minutes) * 60
+            query += " AND d.agg_cost <= %s"
+            params.append(max_seconds)
+
+        query += " ORDER BY d.agg_cost LIMIT %s"
+        params.append(limit)
+
+        cur.execute(query, params)
+        results = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        if not results:
+            return jsonify({
+                "message": f"No {facility_type} found within network reach",
+                "location": {"lon": lon, "lat": lat}
+            }), 200
+
+        return jsonify({
+            "incident": {"lon": lon, "lat": lat},
+            "type": facility_type,
+            "count": len(results),
+            "facilities": results
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+```        
+#### Step 3: Frontend – No changes needed!
+Your existing frontend code (from previous response) already works perfectly with this endpoint.

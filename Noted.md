@@ -134,3 +134,201 @@ volumes:
     - ./data/pmtiles:/data:ro          # mount your pmtiles folder read-only
 command: serve /data --port=9000 --cache-size=512
 ```
+
+## 5. With Kubenates Customize style.json
+```bash
+{
+  "version": 8,
+  "name": "Martin All-in-One",
+  "sources": {
+    "mbtiles-layer": {
+      "type": "vector",
+      "url": "http://map.172-17-65-26.nip.io/tileserver/data/Administrative.json"
+    },
+    "mbtiles-via-martin": {
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.nip.io/Administrative/{z}/{x}/{y}.pbf"]
+    },
+    "pmtiles-via-martin": {
+      "type": "vector",
+      "url": "pmtiles://http://martin.172-17-65-26.nip.io/pmtiles/yourfile.pmtiles"
+    },
+    "dynamic-postgis": {
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.nip.io/topology.your_table/{z}/{x}/{y}.pbf"]
+    }
+  },
+  "sprite": "http://martin.172-17-65-26.nip.io/sprites/basic",
+  "glyphs": "http://martin.172-17-65-26.nip.io/fonts/{fontstack}/{range}.pbf",
+  "layers": [...]
+}
+```
+## K3s DNS Fix - Image Pull Issues
+Problem
+K3s can't pull images because it can't resolve:
+
+registry-1.docker.io (Docker Hub)
+ghcr.io (GitHub Container Registry)
+
+Error: dial tcp: lookup registry-1.docker.io: Try again
+Root Cause
+Your DNS server 10.255.255.254 is blocking or can't resolve these domains.
+### Solution 1: Fix System-Wide DNS (Recommended)
+#### Step 1: Configure WSL DNS
+```bash
+# Stop K3s first
+sudo systemctl stop k3s
+
+# Configure WSL to not auto-generate resolv.conf
+sudo tee /etc/wsl.conf << EOF
+[network]
+generateResolvConf = false
+EOF
+
+# Remove current resolv.conf
+sudo rm /etc/resolv.conf
+
+# Create new resolv.conf with Google DNS
+sudo tee /etc/resolv.conf << EOF
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+nameserver 1.1.1.1
+EOF
+
+# Make it immutable
+sudo chattr +i /etc/resolv.conf
+```
+#### Step 2: Restart WSL
+From Windows PowerShell:
+
+powershell: `wsl --shutdown`
+
+Then restart your WSL terminal.
+#### Step 3: Verify DNS Works
+```bash
+# Test DNS resolution
+nslookup registry-1.docker.io
+nslookup ghcr.io
+nslookup docker.io
+
+# All should resolve successfully
+```
+#### Step 4: Start K3s and Verify
+```bash 
+# Start K3s
+sudo systemctl start k3s
+sudo systemctl status k3s
+
+# Delete failed pods to force recreation
+kubectl delete pod -n map-service --all
+
+# Watch pods restart
+kubectl get pods -n map-service -w
+```
+
+### Complete Fix Procedure
+Run these commands in order:
+```bash
+# 1. Stop K3s
+sudo systemctl stop k3s
+
+# 2. Fix DNS
+sudo tee /etc/wsl.conf << EOF
+[network]
+generateResolvConf = false
+EOF
+
+sudo rm /etc/resolv.conf 2>/dev/null || true
+
+sudo tee /etc/resolv.conf << EOF
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+nameserver 1.1.1.1
+EOF
+
+sudo chattr +i /etc/resolv.conf
+
+# 3. Test DNS
+echo "Testing DNS..."
+nslookup registry-1.docker.io
+nslookup ghcr.io
+
+# 4. Restart K3s
+sudo systemctl start k3s
+sleep 10
+sudo systemctl status k3s
+
+# 5. Delete failed pods
+kubectl delete pod -n map-service --all
+
+# 6. Watch pods come back up
+kubectl get pods -n map-service -w
+```
+### If WSL Shutdown Doesn't Work
+Some systems need a full reboot. Try this:
+```bash
+# From Windows PowerShell (as Administrator)
+wsl --shutdown
+wsl --list --verbose
+
+# If still running, force terminate
+wsl --terminate Ubuntu  # or your distro name
+
+# Restart WSL
+wsl
+```
+
+### Debug Commands
+If issues persist:
+``` bash
+# Check K3s logs
+sudo journalctl -u k3s -f
+
+# Check containerd
+sudo systemctl status containerd
+
+# Check DNS from inside a pod
+kubectl run test-dns --image=busybox --rm -it -- nslookup registry-1.docker.io
+
+# Check K3s DNS
+kubectl get pods -n kube-system
+
+# Check CoreDNS logs
+kubectl logs -n kube-system -l k8s-app=kube-dns
+```
+### Why This Happens in WSL
+WSL typically:
+
+- Auto-generates /etc/resolv.conf from Windows
+- Uses Windows DNS settings
+- Windows might be using VPN/Corporate DNS
+- That DNS blocks external registries
+
+By setting `generateResolvConf = false`, you take control and use public DNS.
+
+## Let's force clean it and reapply manifests:
+```bash
+# 1. Check namespace status
+kubectl get namespace map-service
+
+# 2. Force delete the namespace (this will hang, that's expected)
+kubectl delete namespace map-service --force --grace-period=0 &
+
+# 3. Wait a few seconds
+sleep 5
+
+# 4. Remove finalizers to force cleanup
+kubectl get namespace map-service -o json | \
+  jq '.spec.finalizers = []' | \
+  kubectl replace --raw "/api/v1/namespaces/map-service/finalize" -f -
+
+# 5. Wait for namespace to be fully deleted
+kubectl get namespace map-service
+# Should show "not found"
+
+# 6. Now apply your manifest
+kubectl apply -f all-manifests.yaml
+
+# 7. Watch pods come up
+kubectl get pods -n map-service -w
+```

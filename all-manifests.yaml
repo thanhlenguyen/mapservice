@@ -163,8 +163,8 @@ data:
           "mbtiles": "/data/mbtiles"
         },
         "domains": [
-          "tileserver.172-17-65-26.nip.io",
-          "map.172-17-65-26.nip.io"
+          "tileserver.172-17-65-26.sslip.io",
+          "map.172-17-65-26.sslip.io"
         ],
         "formatQuality": {
           "jpeg": 80,
@@ -916,15 +916,15 @@ spec:
   # For HTTPS (uncomment after installing cert-manager):
   # tls:
   # - hosts:
-  #   - map.172-17-65-26.nip.io
-  #   - martin.172-17-65-26.nip.io
-  #   - tileserver.172-17-65-26.nip.io
-  #   - pgadmin.172-17-65-26.nip.io
-  #   - api.172-17-65-26.nip.io
+  #   - map.172-17-65-26.sslip.io
+  #   - martin.172-17-65-26.sslip.io
+  #   - tileserver.172-17-65-26.sslip.io
+  #   - pgadmin.172-17-65-26.sslip.io
+  #   - api.172-17-65-26.sslip.io
   #   secretName: map-tls-cert
   rules:
   # Frontend
-  - host: map.172-17-65-26.nip.io  # UPDATE: Replace with your node IP
+  - host: map.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP
     http:
       paths:
       - path: /
@@ -936,7 +936,7 @@ spec:
               number: 80
 
   # Martin - Vector tiles and dynamic PostGIS layers
-  - host: martin.172-17-65-26.nip.io  # UPDATE: Replace with your node IP
+  - host: martin.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP
     http:
       paths:
       - path: /
@@ -948,7 +948,7 @@ spec:
               number: 3000
 
   # Tileserver - MBTiles rendering
-  - host: tileserver.172-17-65-26.nip.io  # UPDATE: Replace with your node IP
+  - host: tileserver.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP
     http:
       paths:
       - path: /
@@ -960,7 +960,7 @@ spec:
               number: 8080
 
   # PgAdmin - Database administration
-  - host: pgadmin.172-17-65-26.nip.io  # UPDATE: Replace with your node IP
+  - host: pgadmin.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP
     http:
       paths:
       - path: /
@@ -972,7 +972,7 @@ spec:
               number: 80
   
   # Routing API
-  - host: api.172-17-65-26.nip.io  # UPDATE: Replace with your node IP
+  - host: api.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP
     http:
       paths:
       - path: /
