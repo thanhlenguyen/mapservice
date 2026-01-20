@@ -1450,7 +1450,7 @@ kubectl port-forward -n map-service svc/pgadmin-service 5050:80 &
 - Test connectivity: `kubectl run -it --rm debug --image=busybox --restart=Never -n map-service -- sh`
 
 ## 🎯 Notes
-- Ffter firsttime deployment, if you edit manifest file and restart service:
+- After firsttime deployment, if you edit manifest file and restart service:
 ```bash
 kubectl rollout restart deployment tileserver-n map-service
 ```
@@ -1460,3 +1460,6 @@ Command	Effect
 kubectl apply -f file.yaml	Updates the cluster with changes from your manifest
 kubectl rollout restart deployment ...	Restarts pods using the existing spec in the cluster
 kubectl delete pod ...	Deletes pods; Deployment/ReplicaSet will recreate them with the current spec
+
+- If DNS have some issues, application cannot load:
+  - 

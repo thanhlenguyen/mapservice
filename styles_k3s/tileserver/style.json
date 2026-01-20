@@ -32,7 +32,7 @@
     
     "pois": {
       "type": "vector",
-      "tiles": ["http://martin.172-17-65-26.nip.io/topology.places/{z}/{x}/{y}"],
+      "tiles": ["http://martin.172-17-65-26.sslip.io/topology.places/{z}/{x}/{y}"],
       "minzoom": 12,
       "maxzoom": 22
     }

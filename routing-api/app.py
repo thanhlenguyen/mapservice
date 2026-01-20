@@ -434,12 +434,12 @@ def get_route_with_concave_hull():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/escape_area', methods=['GET'])
-def escape_area():
+@app.route('/service_area', methods=['GET'])
+def service_area():
     """
-    Crime escape analysis - reachable road network from a crime location
+    Service area analysis - reachable road network from a service location
     Input:
-        lon, lat  → crime point
+        lon, lat  → service point
         minutes   → time budget (defaults to 5)
     """
     try:
@@ -453,7 +453,7 @@ def escape_area():
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Snap crime location to nearest vertex
+        # Snap service location to nearest vertex
         cur.execute("""
             WITH p AS (
                 SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geometry AS geom
@@ -473,7 +473,7 @@ def escape_area():
         
         if v["dist"] > 0.1:
             return jsonify({
-                "error": "Crime point too far from road network",
+                "error": "Service point too far from road network",
                 "distance_deg": round(v["dist"], 4)
             }), 404
 
@@ -512,15 +512,252 @@ def escape_area():
             return jsonify({"error": "No reachable network found"}), 404
 
         return jsonify({
-            "crime_point": {"lon": lon, "lat": lat},
+            "service_point": {"lon": lon, "lat": lat},
             "time_minutes": minutes,
             "reachable_network": json.loads(result["geom_union"]),
-            "escape_area": json.loads(result["hull"]),
+            "service_area": json.loads(result["hull"]),
             "edge_count": result["edge_count"]
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/nearest_facility', methods=['GET'])
+def nearest_facility():
+    """
+    Find nearest facilities using pgRouting with optimized spatial pre-filtering
+    """
+    try:
+        # Parse and validate input
+        lon = request.args.get('lon')
+        lat = request.args.get('lat')
+        facility_type = request.args.get('type', 'hospital').lower()
+        limit = request.args.get('limit', 5, type=int)
+        max_minutes = request.args.get('max_minutes', type=float)
+
+        # Validate required params
+        if not lon or not lat:
+            return jsonify({"error": "Missing lon or lat parameter"}), 400
+
+        try:
+            lon = float(lon)
+            lat = float(lat)
+        except ValueError:
+            return jsonify({"error": "Invalid lon/lat values"}), 400
+
+        # Security: only allow supported types
+        allowed_types = ['hospital', 'fire station', 'police', 'clinic']
+        if facility_type not in allowed_types:
+            return jsonify({
+                "error": f"Unsupported facility type. Allowed: {', '.join(allowed_types)}"
+            }), 400
+
+        # Get database connection
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Set query timeout to prevent hanging
+        cur.execute("SET statement_timeout = '15s'")
+
+        # FIXED QUERY: Handle geometry properly - cast to Point if needed
+        query = """
+            WITH click_point AS (
+                SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom
+            ),
+            click_vertex AS (
+                SELECT v.id AS vertex_id
+                FROM topology.vertices v, click_point cp
+                ORDER BY v.geom <-> cp.geom
+                LIMIT 1
+            ),
+            nearby_places AS (
+                SELECT 
+                    p.id,
+                    p.name,
+                    p.type,
+                    p.address,
+                    p.nearest_vertex_id,
+                    ST_X(ST_GeometryN(p.geom, 1)) AS lon,
+                    ST_Y(ST_GeometryN(p.geom, 1)) AS lat,
+                    ST_Distance(
+                        p.geom::geography, 
+                        (SELECT geom FROM click_point)::geography
+                    ) / 1000.0 AS crow_distance_km
+                FROM topology.places p, click_point cp
+                WHERE p.type = %s
+                  AND p.nearest_vertex_id IS NOT NULL
+                  AND ST_DWithin(
+                      p.geom::geography,
+                      cp.geom::geography,
+                      20000  -- 20km radius
+                  )
+                ORDER BY p.geom <-> cp.geom
+                LIMIT 20  -- Pre-filter to 20 closest by straight-line distance
+            )
+            SELECT 
+                np.id,
+                np.name,
+                np.type,
+                np.address,
+                np.crow_distance_km,
+                round(d.agg_cost::numeric, 1) AS travel_seconds,
+                round((d.agg_cost / 60.0)::numeric, 1) AS travel_minutes,
+                np.lon AS facility_lon,
+                np.lat AS facility_lat
+            FROM nearby_places np
+            CROSS JOIN LATERAL (
+                SELECT agg_cost
+                FROM pgr_dijkstraCost(
+                    'SELECT id, source, target, cost, reverse_cost 
+                     FROM topology.ways 
+                     WHERE cost > 0',
+                    (SELECT vertex_id FROM click_vertex),
+                    np.nearest_vertex_id,
+                    directed => true
+                )
+            ) d
+            WHERE d.agg_cost IS NOT NULL
+        """
+
+        params = [lon, lat, facility_type]
+
+        if max_minutes:
+            max_seconds = max_minutes * 60
+            query += " AND d.agg_cost <= %s"
+            params.append(max_seconds)
+
+        query += " ORDER BY d.agg_cost LIMIT %s"
+        params.append(limit)
+
+        # Execute query
+        cur.execute(query, params)
+        results = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        if not results:
+            return jsonify({
+                "message": f"No {facility_type} found within network reach",
+                "incident": {"lon": lon, "lat": lat},
+                "type": facility_type,
+                "count": 0,
+                "facilities": []
+            }), 200
+
+        return jsonify({
+            "incident": {"lon": lon, "lat": lat},
+            "type": facility_type,
+            "count": len(results),
+            "facilities": results
+        })
+
+    except Exception as e:
+        # Log the full error for debugging
+        import traceback
+        print("=" * 80)
+        print("NEAREST FACILITY ERROR:")
+        print(traceback.format_exc())
+        print("=" * 80)
+        
+        return jsonify({
+            "error": str(e),
+            "type": type(e).__name__
+        }), 500
+    
+
+@app.route('/api/test_facility', methods=['GET'])
+def test_facility():
+    """Test endpoint to verify database connection and data"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Test 1: Check if places table exists and has data
+        cur.execute("""
+            SELECT 
+                type, 
+                COUNT(*) as count,
+                COUNT(nearest_vertex_id) as with_vertex
+            FROM topology.places 
+            GROUP BY type
+        """)
+        place_stats = cur.fetchall()
+        
+        # Test 2: Check vertices table
+        cur.execute("SELECT COUNT(*) as count FROM topology.vertices")
+        vertex_count = cur.fetchone()
+        
+        # Test 3: Check ways table
+        cur.execute("SELECT COUNT(*) as count FROM topology.ways WHERE cost > 0")
+        ways_count = cur.fetchone()
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            "status": "ok",
+            "places_by_type": place_stats,
+            "vertices_count": vertex_count['count'],
+            "ways_count": ways_count['count']
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+    
+@app.route('/api/debug_places', methods=['GET'])
+def debug_places():
+    """Debug endpoint to check geometry types in places table"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Check geometry type of places table
+        cur.execute("""
+            SELECT 
+                type,
+                ST_GeometryType(geom) as geom_type,
+                COUNT(*) as count
+            FROM topology.places
+            WHERE type IN ('hospital', 'fire_station', 'police')
+            GROUP BY type, ST_GeometryType(geom)
+            ORDER BY type, count DESC;
+        """)
+        geom_types = cur.fetchall()
+        
+        # Get a sample hospital with its coordinates
+        cur.execute("""
+            SELECT 
+                id,
+                name,
+                type,
+                ST_GeometryType(geom) as geom_type,
+                ST_AsText(geom) as geom_text,
+                nearest_vertex_id
+            FROM topology.places
+            WHERE type = 'hospital'
+            LIMIT 3;
+        """)
+        sample_hospitals = cur.fetchall()
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            "geometry_types": geom_types,
+            "sample_hospitals": sample_hospitals
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

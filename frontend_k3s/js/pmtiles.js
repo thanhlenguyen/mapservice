@@ -8,9 +8,9 @@ window.addEventListener('unload', () => maplibregl.removeProtocol("pmtiles"));
 
 // ---------- 1. Define the three styles ----------
 const STYLES = [
-    { id: 'basic-style', name: 'Default',   url: 'http://map.172-17-65-26.nip.io/styles/pmtiles/style.json', pitch: 0, zoom: 12, bearing: 0 },
-    { id: 'sat-style',   name: 'Satellite', url: 'http://map.172-17-65-26.nip.io/styles/pmtiles/style_sat.json', pitch: 0, zoom: 12, bearing: 0 },
-    { id: '3d-style',    name: '3D',        url: 'http://map.172-17-65-26.nip.io/styles/pmtiles/style_3d.json', pitch: 45, zoom: 14, bearing: 0 }
+    { id: 'basic-style', name: 'Default',   url: 'http://map.172-17-65-26.sslip.io/styles/pmtiles/style.json', pitch: 0, zoom: 12, bearing: 0 },
+    { id: 'sat-style',   name: 'Satellite', url: 'http://map.172-17-65-26.sslip.io/styles/pmtiles/style_sat.json', pitch: 0, zoom: 12, bearing: 0 },
+    { id: '3d-style',    name: '3D',        url: 'http://map.172-17-65-26.sslip.io/styles/pmtiles/style_3d.json', pitch: 45, zoom: 14, bearing: 0 }
 ];
 // ---------- 2. Track current view to preserve user navigation ----------
 let currentCenter = [46.6753, 24.7136];
