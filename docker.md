@@ -31,7 +31,7 @@ Ensure you have Docker and Docker Compose (or Docker Desktop) installed on your 
 We have to use WSL2 to install docker 
 
 - Remove all volume on docker:
-```
+```bash
 docker compose down
 docker volume ls
 docker volume rm {volume name}
@@ -43,7 +43,7 @@ We need a robust PostgreSQL database with the PostGIS extension enabled. This wi
 
 - Create a ```docker-compose.yml``` file for your entire stack.
 
-``` 
+```bash
 # dockerversion: '3.9'
 
 services:
@@ -114,7 +114,7 @@ volumes:
 ``` 
 - Create a ```martin-config.yml``` file in root folder (same folder with docker-compose.yml) to connect data in postgis
 
-```
+```bash
 # Connection keep alive timeout [default: 75]
 keep_alive: 75
 
@@ -197,7 +197,7 @@ postgres:
 
 ```
 - Create ```.env``` to store secret parameters:
-```
+```bash
 # PostGIS Database
 POSTGRES_DB=geodb
 POSTGRES_USER=le
@@ -212,7 +212,7 @@ PGADMIN_EMAIL=admin@admin.com
 PGADMIN_PASSWORD=admin
 ```
 - Create ```config.json``` file to render mbtiles files in TileServer
-```
+```json
 {
   "options": {
     "paths": {
@@ -264,7 +264,7 @@ PGADMIN_PASSWORD=admin
 }
 ```
 - Create ```style.json``` file to render data
-```
+```json
 {
   "version": 8,
   "name": "Riyadh MBTiles + Dynamic POIs",
@@ -559,13 +559,13 @@ PGADMIN_PASSWORD=admin
 
 Run the following command from the directory containing your docker-compose.yml:
 
-```
+```bash
 docker compose up -d
 ```
 ## Note:
 - Check logs of container to see if we have any issue:
 
-``` 
+```bash
 docker compose logs container_name
 ```
 - martin_server is restarting because it cannot connect to PostGIS (the connection string is wrong): please check in ```martin-config.yml``` (because of martin connects with postgis inside docker so ```POSTGRES_HOST``` is not ```localhost```)
@@ -610,7 +610,7 @@ You need a table in PostGIS with a geometry column.
 - Load Data: Use a tool like ogr2ogr or a PostGIS management tool (like pgAdmin) to import your data into the postgis_db container.
 
 - Example SQL (to be run inside the container):
-```
+```sql
 CREATE TABLE pois (
     id SERIAL PRIMARY KEY,
     name TEXT,
@@ -626,34 +626,34 @@ CREATE TABLE pois (
 Ensure the PostGIS extension is enabled in your database for geospatial functionality.
 
 Connect to the database:
-```
+```bash
 psql -h localhost -U le -d geodb -W
 ```
 Enable PostGIS if needed:
-```
+```sql
 CREATE EXTENSION IF NOT EXISTS postgis;  
 ```  
 3. Import GeoJSON or Other Formats Using ogr2ogr
 install ogr2ogr (part of GDAL): 
-```
+```bash
 sudo apt install gdal-bin
 ```
 - Import GeoJSON (most of time we use this task, we don't neet to configure anything in postgres):
 
 Use ogr2ogr to load into PostGIS:
-```
+```bash
 ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" \
 -nln topology.places -nlt PROMOTE_TO_MULTI -lco GEOMETRY_NAME=geom \
 /mnt/d/Git/mapserver/data/pois.geojson
 ```
 Options:
-```
+```bash
 -nln topology.places: Places table in topology schema.
 -nlt PROMOTE_TO_MULTI: Ensures multi-geometry support.
 -lco GEOMETRY_NAME=geom: Names geometry column geom (matches Martin’s default).
 ```
 - Import Shapefile (Similar command):
-```
+```bash
 ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" \
 -nln topology.places -nlt PROMOTE_TO_MULTI -lco GEOMETRY_NAME=geom \
 /mnt/d/Git/mapserver/data/sample.shp
@@ -662,18 +662,19 @@ ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" \
 If you have a CSV (e.g., pois.csv with columns name, lat, lon):
 
   - Copy to PostGIS:
-```sql -h localhost -U le -d geodb -W -c \
+```bash
+sql -h localhost -U le -d geodb -W -c \
 "\COPY topology.places (name, lat, lon) FROM '/mnt/d/Git/mapserver/data/pois.csv' DELIMITER ',' CSV HEADER;"
 ```
   - Add geometry column:
-```
+```sql
 ALTER TABLE topology.places ADD COLUMN geom GEOMETRY(Point, 4326);
 UPDATE topology.places SET geom = ST_SetSRID(ST_MakePoint(lon, lat), 4326);
 ```
 Run `ogr2ogr` in Host:
 
 If GDAL isn’t installed locally:
-```
+```bash
 ogr2ogr:
   image: osgeo/gdal
   command: ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" \
@@ -689,7 +690,7 @@ Run: ```docker compose run --rm ogr2ogr.```
 ### Step 7: Verify Data in PostGIS
 
 Connect to the database:
-```
+```bash
 -- Connect to the database:
 psql -h localhost -U le -d geodb -W
 -- List schema: 
@@ -701,7 +702,7 @@ psql -h localhost -U le -d geodb -W
 ```
 
 Check data: 
-```
+```sql
 SELECT name_cr_arabic, unit_type_en, ST_AsText(geom) FROM topology.places LIMIT 5;
 ```
 Ensure SRID is 4326: ```SELECT ST_SRID(geom) FROM topology.places LIMIT 1;```
@@ -751,7 +752,7 @@ Your dynamic POI TileJSON URL will look like: ```http://localhost:3000/topology.
 
 ## Step 10: Optimize for Your Use Case
 
-```
+```sql
 -- POI Database: If focusing on POIs, create a view for Martin:
 CREATE VIEW topology.poi_view AS
 SELECT osm_id, name, amenity, geom
@@ -772,7 +773,7 @@ Integrate maps, search, and AI in a web UI.
 ### Step 11 Add nginx service and config
 
 - Update `docker-compose.yml` file
-```
+```bash
   nginx:
     image: nginx:alpine
     container_name: nginx
@@ -787,7 +788,7 @@ Integrate maps, search, and AI in a web UI.
       - tileserver-gl    
 ```
 - Create `nginx.conf` file
-```
+```json
 server {
     listen 80;
     server_name localhost;
@@ -807,7 +808,7 @@ server {
 
 ### Step 12 Browse the result:
 -  Create ```index.html``` with Maplibre:
-```
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -942,26 +943,26 @@ Download: [Saudi Arabia Roads (OSM Export)](https://data.humdata.org/dataset/hot
 
 3. Import to PostGIS (runs on host, connects to your container)
 - Use ogr2ogr to import data
-```
+```bash
 ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" -nln topology.ways_raw -nlt PROMOTE_TO_MULTI -overwrite -lco GEOMETRY_NAME=geom /mnt/d/Git/mapserver/data/streets_riyadh.geojson
 ```
 - In QGIS, we can use `Database -> DB Manager` to connect with PostgreSQL to import data
   
 ### Step 14: Enable pgRouting Extension 
 - To create extension `pgrouting` we need to config a bit in docker-compose.yml
-```
+```bash
 postgis:
-    image: pgrouting/pgrouting:16-3.5-3.7               # PostGIS with pgRouting       
+    image: pgrouting/pgrouting:16-3.5-4.0               # PostGIS with pgRouting       
     container_name: postgis_db
 ```
 - Access pgAdmin at http://localhost:5050 (login with your .env creds). Connect to postgis_db, then run:
-```
+```sql
 CREATE EXTENSION IF NOT EXISTS pgrouting;
 ```
 ### Step 15: Build Routing Topology (Run Once via pgAdmin/psql)
 Connect to your DB and Execute these commands in order (via pgAdmin or psql): (adapts to OSM tags; handles missing width/direction with defaults):
 1. Create DB + enable extensions
-```
+```sql
 -- run as postgres superuser
 CREATE DATABASE routing_db;
 \c routing_db
@@ -975,7 +976,7 @@ CREATE EXTENSION IF NOT EXISTS pgrouting;
 If you have a shapefile, import it (e.g. ogr2ogr or shp2pgsql) into ways_raw. Then create a copy we’ll work on:
 
 - Insert data have been cleaned topology in GIS apps (QGIS), it is faster and easier to monitoring process
-```
+```sql
 -- assume ways_raw(geom) exists in 4326
 -- 1. Clean ways table
 DROP TABLE IF EXISTS topology.ways CASCADE;
@@ -1018,7 +1019,7 @@ WHERE geom IS NOT NULL
   AND ST_NPoints(geom) >= 2;
 ```
 -- Create index:
-```
+```sql
 ALTER TABLE topology.ways ADD PRIMARY KEY (id);
 CREATE INDEX ways_gix ON topology.ways USING GIST (geom);
 ```
@@ -1026,7 +1027,7 @@ CREATE INDEX ways_gix ON topology.ways USING GIST (geom);
 3. Create vertices table with pgr_extractVertices()
 
 pgr_extractVertices() will extract vertices and create a vertices_table that you can use to set source/target. Example workflow (projected geometry):
-```
+```sql
 -- Run pgr_extractVertices on the projected geometry (use the projected table and column name)
 DROP TABLE IF EXISTS topology.vertices CASCADE;  
 SELECT * INTO topology.vertices FROM pgr_extractVertices('SELECT id, geom FROM topology.ways');
@@ -1036,7 +1037,7 @@ CREATE INDEX idx_vertices_geom_gist ON topology.vertices USING gist (geom);
 Creates vertices (with id, geom columns) listing unique nodes, and populates in_edges and out_edges. Then update back soure and target in ways 
 
 4. Update source and target 
-```
+```sql
 -- set the source information 
 UPDATE topology.ways AS w
 SET source = v.id 
@@ -1054,7 +1055,7 @@ CREATE INDEX IF NOT EXISTS ways_source_idx ON topology.ways(source);
 CREATE INDEX IF NOT EXISTS ways_target_idx ON topology.ways(target);
 ```
 5. Calculate length, cost, reverse_cost
-```
+```sql
 UPDATE topology.ways SET
   cost = length_m / (speed_kmh * 1000.0 / 3600.0),
   reverse_cost = CASE 
@@ -1064,7 +1065,7 @@ UPDATE topology.ways SET
 ```
 
 6. Vacuum/analyze
-```
+```sql
 VACUUM ANALYZE topology.ways;
 VACUUM ANALYZE topology.vertices;
 ```
@@ -1072,7 +1073,7 @@ VACUUM ANALYZE topology.vertices;
 7.  Quick validation (connected components / debugging)
 
 Check for isolated components (useful to find broken geometry):
-```
+```sql
 SELECT * FROM pgr_connectedComponents('
   SELECT id, source, target, cost, reverse_cost FROM topology.ways'
   );
@@ -1081,7 +1082,7 @@ SELECT * FROM pgr_connectedComponents('
 If you need to filter to a connected subgraph for routing, you can use pgr_connectedComponents to find major components and work on the largest.
 ### Step 16: Add Routing API to docker-compose.yml
 - Append this service to your `services:` section (uses your `.env` for DB):
-```
+```bash
   routing-api:
     image: python:3.12-slim
     container_name: routing-api
@@ -1100,14 +1101,14 @@ If you need to filter to a connected subgraph for routing, you can use pgr_conne
         condition: service_healthy
 ```
 - Create `./routing-api/requirements.txt`
-```
+```python
 # In your routing-api folder
 psycopg2-binary
 flask
 flask-cors
 ```
 - Create `./routing-api/app.py` (same as before, with your DB vars):
-```
+```python
 # app.py — FIXED VERSION
 from flask import Flask, request, jsonify
 import psycopg2
@@ -1259,7 +1260,7 @@ if __name__ == '__main__':
 
 ### Step 17: Proxy via Nginx (Optional but Recommended)
 - Add to your `./nginx.conf` (inside server {}):
-```
+```json
 location /api/ {
         proxy_pass http://routing-api:5000/;
         proxy_set_header Host $host;
@@ -1280,7 +1281,7 @@ location /api/ {
 - Restart: `docker compose up -d --build routing-api nginx`
 ### Step 18: Test in Your Frontend
 - In your `./frontend/index.html`, add:
-```
+```java
     function initMap() {
         map = new maplibregl.Map({
             container: 'map',
@@ -1461,29 +1462,25 @@ Connect to your database and execute:
 ```SQL
 -- 0. Add column if not already present
 ALTER TABLE topology.places ADD COLUMN IF NOT EXISTS nearest_vertex_id BIGINT;
--- 1. Check if GiST index exists on the vertices geometry
-SELECT indexname, indexdef 
+-- 1. Verify Database Indexes
+-- Check existing indexes
+SELECT schemaname, tablename, indexname 
 FROM pg_indexes 
-WHERE tablename = 'vertices' 
-  AND schemaname = 'topology'
-  AND indexdef LIKE '%USING gist%';
+WHERE schemaname = 'topology' 
+  AND tablename IN ('places', 'vertices', 'ways');
 
--- 2. Check if an index exists on the filter column (nearest_vertex_id)
--- This speeds up finding which rows still need updating
-SELECT indexname, indexdef 
-FROM pg_indexes 
-WHERE tablename = 'places' 
-  AND schemaname = 'topology'
-  AND indexdef LIKE '%nearest_vertex_id%';
+-- Create missing indexes if needed
+CREATE INDEX IF NOT EXISTS idx_places_type ON topology.places(type);
+CREATE INDEX IF NOT EXISTS idx_places_geom_gist ON topology.places USING gist(geom);
+CREATE INDEX IF NOT EXISTS idx_vertices_geom_gist ON topology.vertices USING gist(geom);
+CREATE INDEX IF NOT EXISTS idx_ways_cost ON topology.ways(cost) WHERE cost > 0;
 
--- 3. Update statistics so the planner knows how to use the indexes
-ANALYZE topology.vertices;
+-- Analyze tables
 ANALYZE topology.places;
+ANALYZE topology.vertices;
+ANALYZE topology.ways;
 
---If the first check returns nothing, you should create the index immediately:
-CREATE INDEX idx_vertices_geom_gist ON topology.vertices USING gist (geom);
-
--- Compute nearest vertex for EVERY POI (safe to run multiple times)
+-- 2. Compute nearest vertex for EVERY POI (safe to run multiple times)
 UPDATE topology.places p
 SET nearest_vertex_id = (
     SELECT id 
@@ -1496,86 +1493,119 @@ WHERE nearest_vertex_id IS NULL;   -- only compute missing ones. Note: check if 
 -- Index for fast lookup
 CREATE INDEX IF NOT EXISTS places_nearest_vertex_idx 
 ON topology.places (nearest_vertex_id);
-
--- Optional: index on type for faster filtering
-CREATE INDEX IF NOT EXISTS places_type_idx ON topology.places (type);
 ```
 
 #### Step 2: Updated /api/closest_facility endpoint in app.py
 Replace the previous version (or add this one) with this adapted version that uses topology.places:
 ```python
-@app.route('/closest_facility', methods=['GET'])
-def closest_facility():
+@app.route('/nearest_facility', methods=['GET'])
+def nearest_facility():
     """
-    Find nearest facility/facilities using existing topology.places table
-    Only supports: hospital, fire_station, police at this stage
-    
-    Query params:
-        lon, lat        - location of incident/event
-        type            - 'hospital', 'fire_station', 'police'
-        limit           - how many closest results (default 3)
-        max_minutes     - optional time limit in minutes
+    Find nearest facilities using pgRouting with optimized spatial pre-filtering
     """
     try:
-        lon = float(request.args.get('lon'))
-        lat = float(request.args.get('lat'))
+        # Parse and validate input
+        lon = request.args.get('lon')
+        lat = request.args.get('lat')
         facility_type = request.args.get('type', 'hospital').lower()
+        limit = request.args.get('limit', 5, type=int)
+        max_minutes = request.args.get('max_minutes', type=float)
 
-        # Security: only allow supported types for now
-        allowed_types = ['hospital', 'fire_station', 'police']
+        # Validate required params
+        if not lon or not lat:
+            return jsonify({"error": "Missing lon or lat parameter"}), 400
+
+        try:
+            lon = float(lon)
+            lat = float(lat)
+        except ValueError:
+            return jsonify({"error": "Invalid lon/lat values"}), 400
+
+        # Security: only allow supported types
+        allowed_types = ['hospital', 'fire station', 'police', 'clinic']
         if facility_type not in allowed_types:
             return jsonify({
-                "error": f"Unsupported facility type. Currently supported: {', '.join(allowed_types)}"
+                "error": f"Unsupported facility type. Allowed: {', '.join(allowed_types)}"
             }), 400
 
-        limit = int(request.args.get('limit', 3))
-        max_minutes = request.args.get('max_minutes')
-
-        if None in (lon, lat):
-            return jsonify({"error": "Missing lon/lat"}), 400
-
+        # Get database connection
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
+        # Set query timeout to prevent hanging
+        cur.execute("SET statement_timeout = '15s'")
+
+        # FIXED QUERY: Handle geometry properly - cast to Point if needed
         query = """
+            WITH click_point AS (
+                SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom
+            ),
+            click_vertex AS (
+                SELECT v.id AS vertex_id
+                FROM topology.vertices v, click_point cp
+                ORDER BY v.geom <-> cp.geom
+                LIMIT 1
+            ),
+            nearby_places AS (
+                SELECT 
+                    p.id,
+                    p.name,
+                    p.type,
+                    p.address,
+                    p.nearest_vertex_id,
+                    ST_X(ST_GeometryN(p.geom, 1)) AS lon,
+                    ST_Y(ST_GeometryN(p.geom, 1)) AS lat,
+                    ST_Distance(
+                        p.geom::geography, 
+                        (SELECT geom FROM click_point)::geography
+                    ) / 1000.0 AS crow_distance_km
+                FROM topology.places p, click_point cp
+                WHERE p.type = %s
+                  AND p.nearest_vertex_id IS NOT NULL
+                  AND ST_DWithin(
+                      p.geom::geography,
+                      cp.geom::geography,
+                      20000  -- 20km radius
+                  )
+                ORDER BY p.geom <-> cp.geom
+                LIMIT 20  -- Pre-filter to 20 closest by straight-line distance
+            )
             SELECT 
-                p.id,
-                p.name,
-                p.type,
-                p.address,
+                np.id,
+                np.name,
+                np.type,
+                np.address,
+                np.crow_distance_km,
                 round(d.agg_cost::numeric, 1) AS travel_seconds,
-                round(d.agg_cost / 60.0, 1) AS travel_minutes,
-                ST_X(p.geom) AS facility_lon,
-                ST_Y(p.geom) AS facility_lat
-            FROM topology.places p
+                round((d.agg_cost / 60.0)::numeric, 1) AS travel_minutes,
+                np.lon AS facility_lon,
+                np.lat AS facility_lat
+            FROM nearby_places np
             CROSS JOIN LATERAL (
                 SELECT agg_cost
                 FROM pgr_dijkstraCost(
                     'SELECT id, source, target, cost, reverse_cost 
                      FROM topology.ways 
                      WHERE cost > 0',
-                    -- Start: snapped vertex of incident location
-                    (SELECT id FROM topology.vertices 
-                     ORDER BY geom <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326) LIMIT 1),
-                    p.nearest_vertex_id,
+                    (SELECT vertex_id FROM click_vertex),
+                    np.nearest_vertex_id,
                     directed => true
                 )
             ) d
-            WHERE p.type = %s
-              AND p.nearest_vertex_id IS NOT NULL
-              AND d.agg_cost IS NOT NULL
+            WHERE d.agg_cost IS NOT NULL
         """
 
-        params = [lat, lon, facility_type]  # lat first for ST_MakePoint!
+        params = [lon, lat, facility_type]
 
         if max_minutes:
-            max_seconds = float(max_minutes) * 60
+            max_seconds = max_minutes * 60
             query += " AND d.agg_cost <= %s"
             params.append(max_seconds)
 
         query += " ORDER BY d.agg_cost LIMIT %s"
         params.append(limit)
 
+        # Execute query
         cur.execute(query, params)
         results = cur.fetchall()
 
@@ -1585,7 +1615,10 @@ def closest_facility():
         if not results:
             return jsonify({
                 "message": f"No {facility_type} found within network reach",
-                "location": {"lon": lon, "lat": lat}
+                "incident": {"lon": lon, "lat": lat},
+                "type": facility_type,
+                "count": 0,
+                "facilities": []
             }), 200
 
         return jsonify({
@@ -1596,7 +1629,680 @@ def closest_facility():
         })
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # Log the full error for debugging
+        import traceback
+        print("=" * 80)
+        print("NEAREST FACILITY ERROR:")
+        print(traceback.format_exc())
+        print("=" * 80)
+        
+        return jsonify({
+            "error": str(e),
+            "type": type(e).__name__
+        }), 500
+    
 ```        
-#### Step 3: Frontend – No changes needed!
-Your existing frontend code (from previous response) already works perfectly with this endpoint.
+#### Step 3: Frontend – changes needed!
+- Add `Nearest Facilities` button to html
+```html
+        <!-- Main floating control panel -->
+        <div class="control-panel header">
+            <div class="header-content">
+                <h1 class="title">Routing and Services Analysis Tool</h1>
+                
+                <div class="mode-switcher">
+                    <button id="mode-route" class="mode-btn active" type="button">
+                        🗺️ A→B Route
+                    </button>
+                    <button id="mode-tsp" class="mode-btn" type="button">
+                        🔄 TSP Multi
+                    </button>
+                    <button id="mode-facility" class="mode-btn" type="button">
+                        🏥 Nearest Facility
+                    </button>
+                    <button id="mode-service" class="mode-btn" type="button">
+                        🚚 Service Area
+                    </button>
+                </div>
+                
+                <!-- Facility type selector (shown only in facility mode) -->
+                <div id="facility-selector" class="hidden">
+                    <label for="facility-type-select">
+                        Facility Type:
+                    </label>
+                    <select id="facility-type-select">
+                        <option value="hospital">Hospital</option>
+                        <option value="fire station">Fire Station</option>
+                        <option value="police">Police</option>
+                    </select>
+                </div>
+            </div>
+
+            <p class="instruction" id="mode-instruction">
+                Click: <span class="highlight start">Start</span> →
+                <span class="highlight end">End</span>
+            </p>
+        </div>
+```  
+add to styles.css
+```css
+/* Mode-specific colors when active */
+#mode-route.active   { background: #3b82f6; }  /* blue */
+#mode-tsp.active     { background: #8b5cf6; }  /* purple */
+#mode-facility.active { background: #059324; }  /* green */
+#mode-service.active   { background: #ef4444; }  /* red */
+```
+And
+```css
+/* ==========================================================================
+   FACILITY SELECTOR
+   ========================================================================== */
+#facility-selector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+}
+
+#facility-selector label {
+    font-weight: 500;
+    font-size: 0.85rem;
+    color: #4b5563;
+    margin-right: 0.5rem;
+}
+
+#facility-type-select {
+    padding: 0.4rem 0.8rem;
+    border-radius: 0.375rem;
+    border: 1px solid #d1d5db;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85rem;
+    color: #374151;
+    background: white;
+    transition: all 0.2s ease;
+}
+
+#facility-type-select:hover {
+    border-color: #9ca3af;
+}
+
+#facility-type-select:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+```
+And
+```css
+/* ==========================================================================
+   POINTER EVENTS (Critical for map interaction)
+   ========================================================================== */
+/* Let clicks pass through floating panels to the map underneath */
+.control-panel.header,
+.control-panel.slider-panel,
+.control-panel.info-panel {
+    pointer-events: none;
+}
+
+/* But keep interactive elements clickable */
+.control-panel.header button,
+.control-panel.header p,
+.control-panel.header select,
+.control-panel.header label,
+#facility-selector,
+#facility-selector select,
+#facility-selector label,
+#time-slider label,
+#time-slider input,
+#info-box p {
+    pointer-events: auto;
+}
+```
+And
+```css
+/* ==========================================================================
+   RESPONSIVE ADJUSTMENTS
+   ========================================================================== */
+@media (max-width: 600px) {
+    .title {
+        font-size: 1.1rem;
+    }
+
+    .mode-switcher {
+        padding: 0.4rem;
+        gap: 0.35rem;
+    }
+    
+    .mode-btn {
+        padding: 0.55rem 1rem;
+        font-size: 0.85rem;
+        min-width: 100px;
+    }
+    
+    .control-panel {
+        padding: 0.8rem 1rem;
+        min-width: 300px;
+    }
+
+    #facility-selector {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    #facility-selector label {
+        margin-right: 0;
+    }
+
+    #facility-type-select {
+        width: 100%;
+    }
+}
+```
+Add javascript to routing.js
+```js
+const FACILITY_COLORS = {
+    'hospital': '#ef4444',
+    'fire station': '#f97316',
+    'police': '#8b5cf6',
+    'clinic': '#10b981'
+};
+
+// Backend API configuration
+const BACKEND_URL = 'http://localhost:5000';
+
+const API_ENDPOINTS = {
+    route: `${BACKEND_URL}/route`,
+    nearestFacility: `${BACKEND_URL}/nearest_facility`,
+    serviceArea: `${BACKEND_URL}/service_area`
+};
+
+const DEFAULT_CENTER = [46.6167, 24.8258]; // Riyadh
+const DEFAULT_ZOOM = 12;
+const REQUEST_TIMEOUT = 20000; // 20 seconds
+
+
+// ============================================================================
+// STATE MANAGEMENT
+// ============================================================================
+
+const state = {
+    map: null,
+    currentMode: 'route',
+    currentCenter: DEFAULT_CENTER,
+    currentZoom: DEFAULT_ZOOM,
+    currentPitch: 0,
+    currentBearing: 0,
+    markers: {
+        start: null,
+        end: null,
+        service: null,
+        facility: null,
+        tsp: []
+    },
+    currentRouteData: null,
+    serviceMinutes: 5
+};
+
+// ============================================================================
+// MAP INITIALIZATION
+// ============================================================================
+
+function initMap() {
+    state.map = new maplibregl.Map({
+        container: 'map',
+        style: STYLES[0].url,
+        center: state.currentCenter,
+        zoom: state.currentZoom,
+        pitch: state.currentPitch,
+        bearing: state.currentBearing,
+        maxPitch: 85
+    });
+
+    // Track viewport changes
+    state.map.on('moveend', () => {
+        state.currentCenter = state.map.getCenter();
+        state.currentZoom = state.map.getZoom();
+        state.currentPitch = state.map.getPitch();
+        state.currentBearing = state.map.getBearing();
+    });
+
+    // Add controls
+    state.map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    state.map.addControl(createLayerSwitcher(), 'bottom-right');
+
+    // Setup event handlers
+    setupEventHandlers();
+
+    state.map.on('load', () => {
+        showInfo("Click anywhere to begin");
+    });
+}
+
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
+
+function setupEventHandlers() {
+    // Map click handler
+    state.map.on('click', handleMapClick);
+
+    // Mode switcher buttons
+    document.getElementById('mode-route')?.addEventListener('click', () => switchMode('route'));
+    document.getElementById('mode-tsp')?.addEventListener('click', () => switchMode('tsp'));
+    document.getElementById('mode-facility')?.addEventListener('click', () => switchMode('facility'));
+    document.getElementById('mode-service')?.addEventListener('click', () => switchMode('service'));
+
+    // Time slider for service area
+    const timeInput = document.getElementById('time-input');
+    if (timeInput) {
+        timeInput.addEventListener('input', (e) => {
+            state.serviceMinutes = parseInt(e.target.value, 10);
+            document.getElementById('time-value').textContent = state.serviceMinutes;
+            
+            if (state.markers.service) {
+                calculateServiceArea(state.markers.service.getLngLat());
+            }
+        });
+    }
+}
+
+function handleMapClick(e) {
+    const handlers = {
+        'route': handleRouteClick,
+        'tsp': handleTSPClick,
+        'facility': handleFacilityClick,
+        'service': handleServiceClick
+    };
+
+    const handler = handlers[state.currentMode];
+    if (handler) {
+        handler(e.lngLat);
+    }
+}
+
+// ============================================================================
+// MODE SWITCHING
+// ============================================================================
+
+function switchMode(mode) {
+    state.currentMode = mode;
+    clearAll();
+
+    // Update UI
+    updateModeButtons(mode);
+    updateModeInstructions(mode);
+}
+
+function updateModeButtons(activeMode) {
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+
+    const activeBtn = document.getElementById(`mode-${activeMode}`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
+}
+
+function updateModeInstructions(mode) {
+    const timeSlider       = document.getElementById('time-slider');
+    const facilitySelector = document.getElementById('facility-selector');
+    const instruction      = document.getElementById('mode-instruction');
+
+    if (timeSlider) {
+        timeSlider.classList.toggle('hidden', mode !== 'service');
+    }
+
+    if (facilitySelector) {
+        facilitySelector.classList.toggle('hidden', mode !== 'facility');
+    }
+
+    const instructions = {
+        'route': {
+            html: 'Click: <span class="highlight start">Start</span> → <span class="highlight end">End</span>',
+            info: '🗺️ A→B Route mode active'
+        },
+        'tsp': {
+            html: 'Click to add <span style="color:#8b5cf6;font-weight:bold">waypoints</span> (min 3)',
+            info: '🔄 TSP mode: Add at least 3 points'
+        },
+        'facility': {
+            html: 'Click a <span style="color:#ef4444;font-weight:bold">location</span> to find nearest facilities',
+            info: '🏥 Nearest Facility mode active'
+        },
+        'service': {
+            html: 'Click <span style="color:#ef4444;font-weight:bold">service location</span> + adjust time',
+            info: '🚚 Service Area mode active'
+        }
+    };
+
+    const modeConfig = instructions[mode];
+    if (modeConfig && instruction) {
+        instruction.innerHTML = modeConfig.html;
+        showInfo(modeConfig.info);
+    }
+}
+```
+And
+```js
+// ============================================================================
+// NEAREST FACILITY MODE
+// ============================================================================
+
+function handleFacilityClick(lngLat) {
+    // Clean up previous state
+    cleanupFacilityMode();
+
+    // Place marker at click location
+    state.markers.facility = new maplibregl.Marker({
+        element: createMarker('📍', '#dc2626')
+    })
+        .setLngLat(lngLat)
+        .addTo(state.map);
+
+    showInfo("⏳ Searching nearest facilities...");
+    calculateNearestFacilities(lngLat);
+}
+
+function cleanupFacilityMode() {
+    if (state.markers.facility) {
+        state.markers.facility.remove();
+        state.markers.facility = null;
+    }
+
+    const layersToRemove = ['facility-lines', 'facility-points', 'facility-labels', 'facility-names'];
+    layersToRemove.forEach(layerId => {
+        if (state.map.getLayer(layerId)) {
+            state.map.removeLayer(layerId);
+        }
+    });
+
+    if (state.map.getSource('facility-results')) {
+        state.map.removeSource('facility-results');
+    }
+}
+
+async function calculateNearestFacilities(lngLat) {
+    const facilityType = document.getElementById('facility-type-select')?.value || 'hospital';
+    const limit = 5;
+
+    showInfo("⏳ Searching for nearest facilities...<br><small>This may take 10-15 seconds</small>");
+
+    try {
+        // Build URL with correct backend
+        const url = `${API_ENDPOINTS.nearestFacility}?lon=${lngLat.lng}&lat=${lngLat.lat}&type=${facilityType}&limit=${limit}`;
+
+        const data = await fetchWithTimeout(url);
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        if (!data.facilities || data.facilities.length === 0) {
+            showInfo(`ℹ️ No ${facilityType.replace('_', ' ')} found within network reach`);
+            return;
+        }
+
+        displayFacilityResults(lngLat, data, facilityType);
+    } catch (error) {
+        handleError('Facility search', error);
+    }
+}
+
+function displayFacilityResults(lngLat, data, facilityType) {
+    // Create line features from click point to each facility
+    const lineFeatures = data.facilities.map(facility => ({
+        type: "Feature",
+        geometry: {
+            type: "LineString",
+            coordinates: [
+                [lngLat.lng, lngLat.lat],
+                [parseFloat(facility.facility_lon), parseFloat(facility.facility_lat)]
+            ]
+        },
+        properties: {
+            name: facility.name,
+            minutes: parseFloat(facility.travel_minutes),
+            type: facility.type,
+            address: facility.address || '',
+            distance_km: facility.crow_distance_km || null,
+            rank: data.facilities.indexOf(facility) + 1
+        }
+    }));
+
+    // Create point features for facilities
+    const pointFeatures = data.facilities.map(facility => ({
+        type: "Feature",
+        geometry: {
+            type: "Point",
+            coordinates: [parseFloat(facility.facility_lon), parseFloat(facility.facility_lat)]
+        },
+        properties: {
+            name: facility.name,
+            minutes: parseFloat(facility.travel_minutes),
+            type: facility.type,
+            address: facility.address || '',
+            distance_km: facility.crow_distance_km || null,
+            rank: data.facilities.indexOf(facility) + 1
+        }
+    }));
+
+    // Add GeoJSON source
+    state.map.addSource('facility-results', {
+        type: 'geojson',
+        data: {
+            type: "FeatureCollection",
+            features: [...lineFeatures, ...pointFeatures]
+        }
+    });
+
+    const facilityColor = FACILITY_COLORS[facilityType] || '#6366f1';
+
+    // Add line layer (routes to facilities)
+    state.map.addLayer({
+        id: 'facility-lines',
+        type: 'line',
+        source: 'facility-results',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        paint: {
+            'line-color': facilityColor,
+            'line-width': [
+                'interpolate', ['linear'], ['get', 'rank'],
+                1, 5,    // Closest facility: thicker line
+                5, 3     // Farthest: thinner line
+            ],
+            'line-opacity': 0.7,
+            'line-dasharray': [2, 1.5]
+        }
+    });
+
+    // Add facility point layer with numbered markers
+    state.map.addLayer({
+        id: 'facility-points',
+        type: 'circle',
+        source: 'facility-results',
+        filter: ['==', ['geometry-type'], 'Point'],
+        paint: {
+            'circle-radius': [
+                'interpolate', ['linear'], ['zoom'],
+                10, 8,
+                15, 14
+            ],
+            'circle-color': facilityColor,
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 3,
+            'circle-opacity': 0.95
+        }
+    });
+
+    // Add numbered labels on facilities
+    state.map.addLayer({
+        id: 'facility-labels',
+        type: 'symbol',
+        source: 'facility-results',
+        filter: ['==', ['geometry-type'], 'Point'],
+        layout: {
+            'text-field': ['to-string', ['get', 'rank']],
+            'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+            'text-size': 14,
+            'text-allow-overlap': true
+        },
+        paint: {
+            'text-color': '#ffffff',
+            'text-halo-width': 0
+        }
+    });
+
+    // Add facility names below the markers
+    state.map.addLayer({
+        id: 'facility-names',
+        type: 'symbol',
+        source: 'facility-results',
+        filter: ['==', ['geometry-type'], 'Point'],
+        layout: {
+            'text-field': ['concat', ['get', 'name'], '\n', ['get', 'minutes'], ' min'],
+            'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+            'text-size': 11,
+            'text-offset': [0, 2],
+            'text-anchor': 'top',
+            'text-max-width': 12
+        },
+        paint: {
+            'text-color': '#1f2937',
+            'text-halo-color': '#ffffff',
+            'text-halo-width': 2
+        }
+    });
+
+    // Setup interactions
+    setupFacilityInteractions();
+
+    // Display summary
+    const closestFacility = data.facilities[0];
+    const facilityLabel = facilityType.replace('_', ' ');
+    
+    // Build list of all facilities
+    const facilityList = data.facilities.map((f, i) => 
+        `${i + 1}. ${f.name} (${f.travel_minutes} min)`
+    ).join('<br>');
+    
+    showInfo(`
+        ✅ Found ${data.count} ${facilityLabel}${data.count > 1 ? 's' : ''}
+        <br><strong>Closest:</strong> ${closestFacility.name}
+        <br><strong>Travel time:</strong> ${closestFacility.travel_minutes} minutes
+        ${closestFacility.crow_distance_km ? `<br><small>Straight-line: ${closestFacility.crow_distance_km.toFixed(1)} km</small>` : ''}
+        <br><br><small style="font-size: 0.85rem;">${facilityList}</small>
+    `);
+
+    // Fit map bounds
+    fitMapToFacilities(lngLat, data.facilities);
+}
+
+function setupFacilityInteractions() {
+    // Change cursor on hover
+    state.map.on('mouseenter', 'facility-points', () => {
+        state.map.getCanvas().style.cursor = 'pointer';
+    });
+
+    state.map.on('mouseleave', 'facility-points', () => {
+        state.map.getCanvas().style.cursor = '';
+    });
+
+    // Show popup on click
+    state.map.on('click', 'facility-points', (e) => {
+        const props = e.features[0].properties;
+        
+        const popupContent = `
+            <div style="font-family: Inter, sans-serif; min-width: 200px;">
+                <strong style="font-size: 14px; color: #1f2937;">${props.name}</strong>
+                ${props.address ? `<p style="margin: 4px 0; font-size: 12px; color: #6b7280;">${props.address}</p>` : ''}
+                <p style="margin: 8px 0 0 0; font-size: 13px; color: #059669;">
+                    <strong>⏱️ ${props.minutes} minutes</strong> drive
+                </p>
+                ${props.distance_km ? `<p style="margin: 4px 0 0 0; font-size: 11px; color: #9ca3af;">Straight-line: ${parseFloat(props.distance_km).toFixed(1)} km</p>` : ''}
+            </div>
+        `;
+        
+        new maplibregl.Popup({ 
+            offset: 15,
+            closeButton: true,
+            closeOnClick: true
+        })
+            .setLngLat(e.lngLat)
+            .setHTML(popupContent)
+            .addTo(state.map);
+    });
+}
+
+function fitMapToFacilities(lngLat, facilities) {
+    const bounds = new maplibregl.LngLatBounds();
+    bounds.extend([lngLat.lng, lngLat.lat]);
+    
+    facilities.forEach(facility => {
+        bounds.extend([
+            parseFloat(facility.facility_lon), 
+            parseFloat(facility.facility_lat)
+        ]);
+    });
+    
+    state.map.fitBounds(bounds, { 
+        padding: { top: 80, bottom: 80, left: 80, right: 80 },
+        maxZoom: 14,
+        duration: 1000
+    });
+}
+```
+And
+```js
+function clearAll() {
+    // Remove all layers
+    const layersToRemove = [
+        'route',
+        'service-network',
+        'service-hull',
+        'service-border',
+        'facility-lines',
+        'facility-points',
+        'facility-labels',
+        'facility-names'
+    ];
+
+    layersToRemove.forEach(layerId => {
+        if (state.map.getLayer(layerId)) {
+            state.map.removeLayer(layerId);
+        }
+    });
+
+    // Remove all sources
+    const sourcesToRemove = [
+        'route',
+        'service-network',
+        'service-hull',
+        'facility-results'
+    ];
+
+    sourcesToRemove.forEach(sourceId => {
+        if (state.map.getSource(sourceId)) {
+            state.map.removeSource(sourceId);
+        }
+    });
+
+    // Remove all markers
+    Object.keys(state.markers).forEach(key => {
+        if (key === 'tsp') {
+            state.markers.tsp.forEach(item => {
+                if (item.marker) item.marker.remove();
+            });
+            state.markers.tsp = [];
+        } else if (state.markers[key]) {
+            state.markers[key].remove();
+            state.markers[key] = null;
+        }
+    });
+
+    // Reset data
+    state.currentRouteData = null;
+    showInfo("Click to start");
+}
+```

@@ -41,6 +41,7 @@ body {
 .control-panel.header {
     top: 1rem;
     z-index: 20;
+    margin-bottom: 0.5rem;
 }
 
 .header-content {
@@ -98,7 +99,7 @@ body {
 /* Mode-specific colors when active */
 #mode-route.active   { background: #3b82f6; }  /* blue */
 #mode-tsp.active     { background: #8b5cf6; }  /* purple */
-#mode-facility.active,
+#mode-facility.active { background: #059324; }  /* green */
 #mode-service.active   { background: #ef4444; }  /* red */
 
 /* Instruction text */
@@ -159,17 +160,33 @@ body {
    SLIDER PANEL
    ========================================================================== */
 .control-panel.slider-panel {
-    top: 7.5rem;
+    top: 10rem;
+    padding: 1rem 1.5rem;
 }
 
 .slider-label {
     display: block;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-weight: 600;
     color: #374151;
-    margin-bottom: 0.75rem;
+    margin-bottom: 1rem;
+    text-align: center;
+    line-height: 1.5;
+    pointer-events: auto;
 }
 
+/* Slider value span styling */
+#facility-count-value,
+#time-value {
+    color: #3b82f6;
+    font-weight: 700;
+    font-size: 1.1rem;
+    display: inline-block;
+    min-width: 20px;
+    text-align: center;
+}
+
+/* Slider input */
 .range-slider {
     width: 100%;
     max-width: 300px;
@@ -180,6 +197,8 @@ body {
     -webkit-appearance: none;
     appearance: none;
     cursor: pointer;
+    display: block;
+    margin: 0 auto;
 }
 
 .range-slider::-webkit-slider-thumb {
@@ -192,6 +211,11 @@ body {
     border: 4px solid white;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.range-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
 }
 
 .range-slider::-moz-range-thumb {
@@ -202,6 +226,19 @@ body {
     border: 4px solid white;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.range-slider::-moz-range-thumb:hover {
+    transform: scale(1.1);
+}
+
+/* ==========================================================================
+   FACILITY COUNT SLIDER
+   ========================================================================== */
+#facility-count-slider {
+    top: 13rem;
+    z-index: 18;
 }
 
 /* ==========================================================================
@@ -284,9 +321,12 @@ body {
 #facility-selector,
 #facility-selector select,
 #facility-selector label,
-#time-slider label,
-#time-slider input,
-#info-box p {
+#facility-count-slider,
+#facility-count-slider *,
+#time-slider,
+#time-slider *,
+#info-box,
+#info-box * {
     pointer-events: auto;
 }
 
@@ -326,6 +366,10 @@ body {
     #facility-type-select {
         width: 100%;
     }
+
+    .range-slider {
+        max-width: 250px;
+    }
 }
 
 @media (max-width: 400px) {
@@ -340,5 +384,9 @@ body {
     .mode-btn {
         min-width: 90px;
         font-size: 0.8rem;
+    }
+
+    .range-slider {
+        max-width: 220px;
     }
 }

@@ -1,5 +1,5 @@
 // ============================================================================
-// CONFIGURATION & CONSTANTS
+// CONFIGURATION & CONSTANTS - Routing JavaScript
 // ============================================================================
 
 const STYLES = [
@@ -15,6 +15,13 @@ const FACILITY_COLORS = {
     'clinic': '#10b981'
 };
 
+const FACILITY_ICONS = {
+    'hospital': '🏥',
+    'fire station': '🚒',
+    'police': '👮',
+    'clinic': '⚕️'
+};
+
 // Backend API configuration
 const BACKEND_URL = 'http://localhost:5000';
 
@@ -28,6 +35,9 @@ const DEFAULT_CENTER = [46.6167, 24.8258]; // Riyadh
 const DEFAULT_ZOOM = 12;
 const REQUEST_TIMEOUT = 20000; // 20 seconds
 
+// Global limits for sliders - CHANGE THESE TO UPDATE MAX VALUES
+const MAX_FACILITY_COUNT = 20;  // Maximum facilities to search
+const MAX_SERVICE_MINUTES = 20; // Maximum service area time in minutes
 
 // ============================================================================
 // STATE MANAGEMENT
@@ -47,8 +57,10 @@ const state = {
         facility: null,
         tsp: []
     },
+    facilityMarkers: [],
     currentRouteData: null,
-    serviceMinutes: 5
+    serviceMinutes: 5,
+    facilityCount: 5  // Default number of facilities to find
 };
 
 // ============================================================================
@@ -77,6 +89,9 @@ function initMap() {
     // Add controls
     state.map.addControl(new maplibregl.NavigationControl(), 'top-right');
     state.map.addControl(createLayerSwitcher(), 'bottom-right');
+    
+    // Initialize sliders with global limits
+    initializeSliders();
 
     // Setup event handlers
     setupEventHandlers();
@@ -84,6 +99,24 @@ function initMap() {
     state.map.on('load', () => {
         showInfo("Click anywhere to begin");
     });
+}
+
+// ============================================================================
+// SLIDER INITIALIZATION
+// ============================================================================
+
+function initializeSliders() {
+    // Initialize facility count slider
+    const facilityCountInput = document.getElementById('facility-count-input');
+    if (facilityCountInput) {
+        facilityCountInput.max = MAX_FACILITY_COUNT;
+    }
+
+    // Initialize service time slider
+    const timeInput = document.getElementById('time-input');
+    if (timeInput) {
+        timeInput.max = MAX_SERVICE_MINUTES;
+    }
 }
 
 // ============================================================================
@@ -100,15 +133,37 @@ function setupEventHandlers() {
     document.getElementById('mode-facility')?.addEventListener('click', () => switchMode('facility'));
     document.getElementById('mode-service')?.addEventListener('click', () => switchMode('service'));
 
-    // Time slider for service area
+// Time slider for service area
     const timeInput = document.getElementById('time-input');
-    if (timeInput) {
+    const timeValue = document.getElementById('time-value');
+    if (timeInput && timeValue) {
+        // Set initial value
+        timeValue.textContent = timeInput.value;
+        
         timeInput.addEventListener('input', (e) => {
             state.serviceMinutes = parseInt(e.target.value, 10);
-            document.getElementById('time-value').textContent = state.serviceMinutes;
+            timeValue.textContent = state.serviceMinutes;
             
             if (state.markers.service) {
                 calculateServiceArea(state.markers.service.getLngLat());
+            }
+        });
+    }
+
+    // Facility count slider
+    const facilityCountInput = document.getElementById('facility-count-input');
+    const facilityCountValue = document.getElementById('facility-count-value');
+    if (facilityCountInput && facilityCountValue) {
+        // Set initial value
+        facilityCountValue.textContent = facilityCountInput.value;
+        
+        facilityCountInput.addEventListener('input', (e) => {
+            state.facilityCount = parseInt(e.target.value, 10);
+            facilityCountValue.textContent = state.facilityCount;
+            
+            // Automatically recalculate if a facility search is active
+            if (state.markers.facility) {
+                calculateNearestFacilities(state.markers.facility.getLngLat());
             }
         });
     }
@@ -153,9 +208,10 @@ function updateModeButtons(activeMode) {
 }
 
 function updateModeInstructions(mode) {
-    const timeSlider       = document.getElementById('time-slider');
+    const timeSlider = document.getElementById('time-slider');
     const facilitySelector = document.getElementById('facility-selector');
-    const instruction      = document.getElementById('mode-instruction');
+    const facilityCountSlider = document.getElementById('facility-count-slider');
+    const instruction = document.getElementById('mode-instruction');
 
     if (timeSlider) {
         timeSlider.classList.toggle('hidden', mode !== 'service');
@@ -163,6 +219,10 @@ function updateModeInstructions(mode) {
 
     if (facilitySelector) {
         facilitySelector.classList.toggle('hidden', mode !== 'facility');
+    }
+
+    if (facilityCountSlider) {
+        facilityCountSlider.classList.toggle('hidden', mode !== 'facility');
     }
 
     const instructions = {
@@ -323,27 +383,37 @@ function cleanupFacilityMode() {
         state.markers.facility = null;
     }
 
-    const layersToRemove = ['facility-lines', 'facility-points', 'facility-labels', 'facility-names'];
+    // Remove facility icon markers
+    if (state.facilityMarkers) {
+        state.facilityMarkers.forEach(marker => marker.remove());
+        state.facilityMarkers = [];
+    }
+
+    // Remove route layers
+    const layersToRemove = ['facility-routes'];
     layersToRemove.forEach(layerId => {
         if (state.map.getLayer(layerId)) {
             state.map.removeLayer(layerId);
         }
     });
 
-    if (state.map.getSource('facility-results')) {
-        state.map.removeSource('facility-results');
-    }
+    const sourcesToRemove = ['facility-routes'];
+    sourcesToRemove.forEach(sourceId => {
+        if (state.map.getSource(sourceId)) {
+            state.map.removeSource(sourceId);
+        }
+    });
 }
 
 async function calculateNearestFacilities(lngLat) {
     const facilityType = document.getElementById('facility-type-select')?.value || 'hospital';
-    const limit = 5;
+    const limit = state.facilityCount;
 
     showInfo("⏳ Searching for nearest facilities...<br><small>This may take 10-15 seconds</small>");
 
     try {
-        // Build URL with correct backend
-        const url = `${API_ENDPOINTS.nearestFacility}?lon=${lngLat.lng}&lat=${lngLat.lat}&type=${facilityType}&limit=${limit}`;
+        // Build URL with correct backend - request routes too
+        const url = `${API_ENDPOINTS.nearestFacility}?lon=${lngLat.lng}&lat=${lngLat.lat}&type=${encodeURIComponent(facilityType)}&limit=${limit}&routes=true`;
 
         const data = await fetchWithTimeout(url);
 
@@ -352,7 +422,7 @@ async function calculateNearestFacilities(lngLat) {
         }
 
         if (!data.facilities || data.facilities.length === 0) {
-            showInfo(`ℹ️ No ${facilityType.replace('_', ' ')} found within network reach`);
+            showInfo(`ℹ️ No ${facilityType} found within network reach`);
             return;
         }
 
@@ -363,145 +433,156 @@ async function calculateNearestFacilities(lngLat) {
 }
 
 function displayFacilityResults(lngLat, data, facilityType) {
-    // Create line features from click point to each facility
-    const lineFeatures = data.facilities.map(facility => ({
-        type: "Feature",
-        geometry: {
-            type: "LineString",
-            coordinates: [
-                [lngLat.lng, lngLat.lat],
-                [parseFloat(facility.facility_lon), parseFloat(facility.facility_lat)]
-            ]
-        },
-        properties: {
-            name: facility.name,
-            minutes: parseFloat(facility.travel_minutes),
-            type: facility.type,
-            address: facility.address || '',
-            distance_km: facility.crow_distance_km || null,
-            rank: data.facilities.indexOf(facility) + 1
-        }
-    }));
-
-    // Create point features for facilities
-    const pointFeatures = data.facilities.map(facility => ({
-        type: "Feature",
-        geometry: {
-            type: "Point",
-            coordinates: [parseFloat(facility.facility_lon), parseFloat(facility.facility_lat)]
-        },
-        properties: {
-            name: facility.name,
-            minutes: parseFloat(facility.travel_minutes),
-            type: facility.type,
-            address: facility.address || '',
-            distance_km: facility.crow_distance_km || null,
-            rank: data.facilities.indexOf(facility) + 1
-        }
-    }));
-
-    // Add GeoJSON source
-    state.map.addSource('facility-results', {
-        type: 'geojson',
-        data: {
-            type: "FeatureCollection",
-            features: [...lineFeatures, ...pointFeatures]
+    // Collect all route features from all facilities
+    const allRouteFeatures = [];
+    
+    data.facilities.forEach((facility, index) => {
+        // Add route features if available
+        if (facility.route && facility.route.features) {
+            facility.route.features.forEach(feature => {
+                allRouteFeatures.push({
+                    ...feature,
+                    properties: {
+                        ...feature.properties,
+                        facility_name: facility.name,
+                        facility_rank: index + 1,
+                        travel_minutes: facility.travel_minutes
+                    }
+                });
+            });
         }
     });
 
-    const facilityColor = FACILITY_COLORS[facilityType] || '#6366f1';
+    // Add routes source and layer
+    if (allRouteFeatures.length > 0) {
+        state.map.addSource('facility-routes', {
+            type: 'geojson',
+            data: {
+                type: "FeatureCollection",
+                features: allRouteFeatures
+            }
+        });
 
-    // Add line layer (routes to facilities)
-    state.map.addLayer({
-        id: 'facility-lines',
-        type: 'line',
-        source: 'facility-results',
-        filter: ['==', ['geometry-type'], 'LineString'],
-        paint: {
-            'line-color': facilityColor,
-            'line-width': [
-                'interpolate', ['linear'], ['get', 'rank'],
-                1, 5,    // Closest facility: thicker line
-                5, 3     // Farthest: thinner line
-            ],
-            'line-opacity': 0.7,
-            'line-dasharray': [2, 1.5]
-        }
+        const facilityColor = FACILITY_COLORS[facilityType] || '#6366f1';
+
+        state.map.addLayer({
+            id: 'facility-routes',
+            type: 'line',
+            source: 'facility-routes',
+            paint: {
+                'line-color': facilityColor,
+                'line-width': [
+                    'interpolate', ['linear'], ['get', 'facility_rank'],
+                    1, 6,    // Closest facility: thicker line
+                    5, 3     // Farthest: thinner line
+                ],
+                'line-opacity': 0.8
+            }
+        });
+    }
+
+    // Create facility markers with icons
+    const facilityMarkers = [];
+    
+    data.facilities.forEach((facility, index) => {
+        const facilityIcon = FACILITY_ICONS[facility.type] || '📍';
+        const facilityColor = FACILITY_COLORS[facility.type] || '#6366f1';
+        
+        // Create custom marker element with icon and rank
+        const markerEl = document.createElement('div');
+        markerEl.className = 'facility-marker';
+        markerEl.style.cssText = `
+            width: 48px;
+            height: 48px;
+            background: ${facilityColor};
+            border: 3px solid white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            cursor: pointer;
+            position: relative;
+        `;
+        markerEl.innerHTML = facilityIcon;
+        
+        // Add rank badge
+        const rankBadge = document.createElement('div');
+        rankBadge.className = 'rank-badge';
+        rankBadge.style.cssText = `
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 24px;
+            height: 24px;
+            background: white;
+            border: 2px solid ${facilityColor};
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            color: ${facilityColor};
+        `;
+        rankBadge.textContent = index + 1;
+        markerEl.appendChild(rankBadge);
+        
+        // Create MapLibre marker
+        const marker = new maplibregl.Marker({ element: markerEl })
+            .setLngLat([parseFloat(facility.facility_lon), parseFloat(facility.facility_lat)])
+            .addTo(state.map);
+        
+        // Add click handler for popup
+        markerEl.addEventListener('click', () => {
+            const popupContent = `
+                <div style="font-family: Inter, sans-serif; min-width: 220px;">
+                    <div style="font-size: 24px; margin-bottom: 8px;">${facilityIcon}</div>
+                    <strong style="font-size: 14px; color: #1f2937;">${facility.name}</strong>
+                    ${facility.address ? `<p style="margin: 4px 0; font-size: 12px; color: #6b7280;">${facility.address}</p>` : ''}
+                    <p style="margin: 8px 0 0 0; font-size: 13px; color: #059669;">
+                        <strong>⏱️ ${facility.travel_minutes} minutes</strong> drive
+                    </p>
+                    <p style="margin: 4px 0 0 0; font-size: 11px; color: #9ca3af;">
+                        Rank: #${index + 1}
+                        ${facility.crow_distance_km ? ` • ${parseFloat(facility.crow_distance_km).toFixed(1)} km straight-line` : ''}
+                    </p>
+                </div>
+            `;
+            
+            new maplibregl.Popup({ 
+                offset: 25,
+                closeButton: true,
+                closeOnClick: true
+            })
+                .setLngLat([parseFloat(facility.facility_lon), parseFloat(facility.facility_lat)])
+                .setHTML(popupContent)
+                .addTo(state.map);
+        });
+        
+        facilityMarkers.push(marker);
     });
-
-    // Add facility point layer with numbered markers
-    state.map.addLayer({
-        id: 'facility-points',
-        type: 'circle',
-        source: 'facility-results',
-        filter: ['==', ['geometry-type'], 'Point'],
-        paint: {
-            'circle-radius': [
-                'interpolate', ['linear'], ['zoom'],
-                10, 8,
-                15, 14
-            ],
-            'circle-color': facilityColor,
-            'circle-stroke-color': '#ffffff',
-            'circle-stroke-width': 3,
-            'circle-opacity': 0.95
-        }
-    });
-
-    // Add numbered labels on facilities
-    state.map.addLayer({
-        id: 'facility-labels',
-        type: 'symbol',
-        source: 'facility-results',
-        filter: ['==', ['geometry-type'], 'Point'],
-        layout: {
-            'text-field': ['to-string', ['get', 'rank']],
-            'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-            'text-size': 14,
-            'text-allow-overlap': true
-        },
-        paint: {
-            'text-color': '#ffffff',
-            'text-halo-width': 0
-        }
-    });
-
-    // Add facility names below the markers
-    state.map.addLayer({
-        id: 'facility-names',
-        type: 'symbol',
-        source: 'facility-results',
-        filter: ['==', ['geometry-type'], 'Point'],
-        layout: {
-            'text-field': ['concat', ['get', 'name'], '\n', ['get', 'minutes'], ' min'],
-            'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-            'text-size': 11,
-            'text-offset': [0, 2],
-            'text-anchor': 'top',
-            'text-max-width': 12
-        },
-        paint: {
-            'text-color': '#1f2937',
-            'text-halo-color': '#ffffff',
-            'text-halo-width': 2
-        }
-    });
-
-    // Setup interactions
-    setupFacilityInteractions();
+    
+    // Store markers for cleanup
+    if (!state.facilityMarkers) {
+        state.facilityMarkers = [];
+    }
+    state.facilityMarkers = facilityMarkers;
 
     // Display summary
     const closestFacility = data.facilities[0];
-    const facilityLabel = facilityType.replace('_', ' ');
+    const facilityLabel = facilityType;
+    const facilityIcon = FACILITY_ICONS[facilityType] || '📍';
     
     // Build list of all facilities
     const facilityList = data.facilities.map((f, i) => 
-        `${i + 1}. ${f.name} (${f.travel_minutes} min)`
+        `${i + 1}. ${FACILITY_ICONS[f.type] || '📍'} ${f.name} (${f.travel_minutes} min)`
     ).join('<br>');
     
     showInfo(`
         ✅ Found ${data.count} ${facilityLabel}${data.count > 1 ? 's' : ''}
-        <br><strong>Closest:</strong> ${closestFacility.name}
+        <br><strong>Closest:</strong> ${facilityIcon} ${closestFacility.name}
         <br><strong>Travel time:</strong> ${closestFacility.travel_minutes} minutes
         ${closestFacility.crow_distance_km ? `<br><small>Straight-line: ${closestFacility.crow_distance_km.toFixed(1)} km</small>` : ''}
         <br><br><small style="font-size: 0.85rem;">${facilityList}</small>
@@ -509,42 +590,6 @@ function displayFacilityResults(lngLat, data, facilityType) {
 
     // Fit map bounds
     fitMapToFacilities(lngLat, data.facilities);
-}
-
-function setupFacilityInteractions() {
-    // Change cursor on hover
-    state.map.on('mouseenter', 'facility-points', () => {
-        state.map.getCanvas().style.cursor = 'pointer';
-    });
-
-    state.map.on('mouseleave', 'facility-points', () => {
-        state.map.getCanvas().style.cursor = '';
-    });
-
-    // Show popup on click
-    state.map.on('click', 'facility-points', (e) => {
-        const props = e.features[0].properties;
-        
-        const popupContent = `
-            <div style="font-family: Inter, sans-serif; min-width: 200px;">
-                <strong style="font-size: 14px; color: #1f2937;">${props.name}</strong>
-                ${props.address ? `<p style="margin: 4px 0; font-size: 12px; color: #6b7280;">${props.address}</p>` : ''}
-                <p style="margin: 8px 0 0 0; font-size: 13px; color: #059669;">
-                    <strong>⏱️ ${props.minutes} minutes</strong> drive
-                </p>
-                ${props.distance_km ? `<p style="margin: 4px 0 0 0; font-size: 11px; color: #9ca3af;">Straight-line: ${parseFloat(props.distance_km).toFixed(1)} km</p>` : ''}
-            </div>
-        `;
-        
-        new maplibregl.Popup({ 
-            offset: 15,
-            closeButton: true,
-            closeOnClick: true
-        })
-            .setLngLat(e.lngLat)
-            .setHTML(popupContent)
-            .addTo(state.map);
-    });
 }
 
 function fitMapToFacilities(lngLat, facilities) {
@@ -765,10 +810,7 @@ function clearAll() {
         'service-network',
         'service-hull',
         'service-border',
-        'facility-lines',
-        'facility-points',
-        'facility-labels',
-        'facility-names'
+        'facility-routes'
     ];
 
     layersToRemove.forEach(layerId => {
@@ -782,7 +824,7 @@ function clearAll() {
         'route',
         'service-network',
         'service-hull',
-        'facility-results'
+        'facility-routes'
     ];
 
     sourcesToRemove.forEach(sourceId => {
@@ -791,7 +833,13 @@ function clearAll() {
         }
     });
 
-    // Remove all markers
+    // Remove facility markers
+    if (state.facilityMarkers) {
+        state.facilityMarkers.forEach(marker => marker.remove());
+        state.facilityMarkers = [];
+    }
+
+    // Remove all other markers
     Object.keys(state.markers).forEach(key => {
         if (key === 'tsp') {
             state.markers.tsp.forEach(item => {

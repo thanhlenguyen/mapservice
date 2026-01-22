@@ -525,7 +525,7 @@ def service_area():
 @app.route('/nearest_facility', methods=['GET'])
 def nearest_facility():
     """
-    Find nearest facilities using pgRouting with optimized spatial pre-filtering
+    Find nearest facilities using pgRouting with actual route geometries
     """
     try:
         # Parse and validate input
@@ -534,6 +534,7 @@ def nearest_facility():
         facility_type = request.args.get('type', 'hospital').lower()
         limit = request.args.get('limit', 5, type=int)
         max_minutes = request.args.get('max_minutes', type=float)
+        include_routes = request.args.get('routes', 'true').lower() == 'true'
 
         # Validate required params
         if not lon or not lat:
@@ -559,16 +560,24 @@ def nearest_facility():
         # Set query timeout to prevent hanging
         cur.execute("SET statement_timeout = '15s'")
 
-        # FIXED QUERY: Handle geometry properly - cast to Point if needed
+        # First, get the click point vertex
+        cur.execute("""
+            SELECT id 
+            FROM topology.vertices 
+            ORDER BY geom <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+            LIMIT 1
+        """, (lon, lat))
+        
+        click_vertex = cur.fetchone()
+        if not click_vertex:
+            return jsonify({"error": "Could not snap to road network"}), 404
+        
+        click_vertex_id = click_vertex['id']
+
+        # Find nearby facilities and calculate costs
         query = """
             WITH click_point AS (
                 SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom
-            ),
-            click_vertex AS (
-                SELECT v.id AS vertex_id
-                FROM topology.vertices v, click_point cp
-                ORDER BY v.geom <-> cp.geom
-                LIMIT 1
             ),
             nearby_places AS (
                 SELECT 
@@ -589,10 +598,10 @@ def nearest_facility():
                   AND ST_DWithin(
                       p.geom::geography,
                       cp.geom::geography,
-                      20000  -- 20km radius
+                      20000
                   )
                 ORDER BY p.geom <-> cp.geom
-                LIMIT 20  -- Pre-filter to 20 closest by straight-line distance
+                LIMIT 20
             )
             SELECT 
                 np.id,
@@ -600,6 +609,7 @@ def nearest_facility():
                 np.type,
                 np.address,
                 np.crow_distance_km,
+                np.nearest_vertex_id,
                 round(d.agg_cost::numeric, 1) AS travel_seconds,
                 round((d.agg_cost / 60.0)::numeric, 1) AS travel_minutes,
                 np.lon AS facility_lon,
@@ -611,7 +621,7 @@ def nearest_facility():
                     'SELECT id, source, target, cost, reverse_cost 
                      FROM topology.ways 
                      WHERE cost > 0',
-                    (SELECT vertex_id FROM click_vertex),
+                    %s,
                     np.nearest_vertex_id,
                     directed => true
                 )
@@ -619,7 +629,7 @@ def nearest_facility():
             WHERE d.agg_cost IS NOT NULL
         """
 
-        params = [lon, lat, facility_type]
+        params = [lon, lat, facility_type, click_vertex_id]
 
         if max_minutes:
             max_seconds = max_minutes * 60
@@ -633,10 +643,9 @@ def nearest_facility():
         cur.execute(query, params)
         results = cur.fetchall()
 
-        cur.close()
-        conn.close()
-
         if not results:
+            cur.close()
+            conn.close()
             return jsonify({
                 "message": f"No {facility_type} found within network reach",
                 "incident": {"lon": lon, "lat": lat},
@@ -645,11 +654,54 @@ def nearest_facility():
                 "facilities": []
             }), 200
 
+        # Get route geometries if requested
+        facilities_with_routes = []
+        for facility in results:
+            facility_dict = dict(facility)
+            
+            if include_routes:
+                # Get actual route geometry
+                cur.execute("""
+                    WITH route_path AS (
+                        SELECT seq, edge
+                        FROM pgr_dijkstra(
+                            'SELECT id, source, target, cost, reverse_cost 
+                             FROM topology.ways 
+                             WHERE cost > 0',
+                            %s, %s, directed => true
+                        )
+                        WHERE edge != -1
+                        ORDER BY seq
+                    )
+                    SELECT json_agg(
+                        json_build_object(
+                            'type', 'Feature',
+                            'geometry', ST_AsGeoJSON(w.geom)::json,
+                            'properties', json_build_object('segment', rp.seq)
+                        )
+                        ORDER BY rp.seq
+                    ) AS route_geojson
+                    FROM route_path rp
+                    JOIN topology.ways w ON rp.edge = w.id
+                """, (click_vertex_id, facility['nearest_vertex_id']))
+                
+                route_result = cur.fetchone()
+                if route_result and route_result['route_geojson']:
+                    facility_dict['route'] = {
+                        "type": "FeatureCollection",
+                        "features": route_result['route_geojson']
+                    }
+            
+            facilities_with_routes.append(facility_dict)
+
+        cur.close()
+        conn.close()
+
         return jsonify({
             "incident": {"lon": lon, "lat": lat},
             "type": facility_type,
-            "count": len(results),
-            "facilities": results
+            "count": len(facilities_with_routes),
+            "facilities": facilities_with_routes
         })
 
     except Exception as e:
@@ -665,7 +717,6 @@ def nearest_facility():
             "type": type(e).__name__
         }), 500
     
-
 @app.route('/api/test_facility', methods=['GET'])
 def test_facility():
     """Test endpoint to verify database connection and data"""

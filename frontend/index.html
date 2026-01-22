@@ -60,6 +60,22 @@
             </p>
         </div>
 
+        <!-- Facility count slider (shown in Nearest Facility mode) -->
+        <div id="facility-count-slider" class="control-panel slider-panel hidden">
+            <label class="slider-label">
+                Find: <span id="facility-count-value">5</span> facilities
+            </label>
+            <input 
+                type="range" 
+                id="facility-count-input" 
+                min="1" 
+                max="10" 
+                value="5" 
+                step="1"
+                class="range-slider"
+            />
+        </div>
+        
         <!-- Time range slider (shown in Service Area mode) -->
         <div id="time-slider" class="control-panel slider-panel hidden">
             <label class="slider-label">
