@@ -3,9 +3,9 @@
 // ============================================================================
 
 const STYLES = [
-    { id: 'basic', name: 'Default', url: 'http://localhost:8080/styles/basic-style/style.json', pitch: 0, zoom: 12 },
-    { id: 'sat', name: 'Satellite', url: 'http://localhost:8080/styles/sat-style/style.json', pitch: 0, zoom: 12 },
-    { id: '3d', name: '3D', url: 'http://localhost:8080/styles/3d-style/style.json', pitch: 45, zoom: 14 }
+    { id: 'basic-style', name: 'Default',   url: 'http://localhost:3001/styles/martin/style.json', pitch: 0, zoom: 12, bearing: 0 },
+    { id: 'sat-style',   name: 'Satellite', url: 'http://localhost:3001/styles/martin/style_sat.json', pitch: 0, zoom: 12, bearing: 0 },
+    { id: '3d-style',    name: '3D',        url: 'http://localhost:3001/styles/martin/style_3d.json', pitch: 45, zoom: 14, bearing: 0 }
 ];
 
 const FACILITY_COLORS = {
@@ -38,6 +38,7 @@ const REQUEST_TIMEOUT = 20000; // 20 seconds
 // Global limits for sliders - CHANGE THESE TO UPDATE MAX VALUES
 const MAX_FACILITY_COUNT = 20;  // Maximum facilities to search
 const MAX_SERVICE_MINUTES = 20; // Maximum service area time in minutes
+const MAX_SEARCH_DISTANCE_KM = 30; // Maximum search distance in kilometers
 
 // ============================================================================
 // STATE MANAGEMENT
@@ -60,8 +61,9 @@ const state = {
     facilityMarkers: [],
     currentRouteData: null,
     serviceMinutes: 5,
-    facilityCount: 5  // Default number of facilities to find
-};
+    facilityCount: 5,  // Default number of facilities to find
+    searchDistanceKm: 10 // Default search distance in kilometers
+    };
 
 // ============================================================================
 // MAP INITIALIZATION
@@ -117,6 +119,12 @@ function initializeSliders() {
     if (timeInput) {
         timeInput.max = MAX_SERVICE_MINUTES;
     }
+    
+    // Initialize search distance slider
+    const distanceInput = document.getElementById('distance-input');
+    if (distanceInput) {
+        distanceInput.max = MAX_SEARCH_DISTANCE_KM;
+    }
 }
 
 // ============================================================================
@@ -167,6 +175,24 @@ function setupEventHandlers() {
             }
         });
     }
+    
+    // Search distance slider
+    const distanceInput = document.getElementById('distance-input');
+    const distanceValue = document.getElementById('distance-value');
+    if (distanceInput && distanceValue) {
+        // Set initial value
+        distanceValue.textContent = distanceInput.value;
+        
+        distanceInput.addEventListener('input', (e) => {
+            state.searchDistanceKm = parseInt(e.target.value, 10);
+            distanceValue.textContent = state.searchDistanceKm;
+            
+            // Automatically recalculate if a facility search is active
+            if (state.markers.facility) {
+                calculateNearestFacilities(state.markers.facility.getLngLat());
+            }
+        });
+    }
 }
 
 function handleMapClick(e) {
@@ -210,7 +236,7 @@ function updateModeButtons(activeMode) {
 function updateModeInstructions(mode) {
     const timeSlider = document.getElementById('time-slider');
     const facilitySelector = document.getElementById('facility-selector');
-    const facilityCountSlider = document.getElementById('facility-count-slider');
+    const facilitySlidersContainer = document.getElementById('facility-sliders-container');
     const instruction = document.getElementById('mode-instruction');
 
     if (timeSlider) {
@@ -221,8 +247,8 @@ function updateModeInstructions(mode) {
         facilitySelector.classList.toggle('hidden', mode !== 'facility');
     }
 
-    if (facilityCountSlider) {
-        facilityCountSlider.classList.toggle('hidden', mode !== 'facility');
+    if (facilitySlidersContainer) {
+        facilitySlidersContainer.classList.toggle('hidden', mode !== 'facility');
     }
 
     const instructions = {
@@ -408,12 +434,13 @@ function cleanupFacilityMode() {
 async function calculateNearestFacilities(lngLat) {
     const facilityType = document.getElementById('facility-type-select')?.value || 'hospital';
     const limit = state.facilityCount;
+    const maxDistanceKm = state.searchDistanceKm;
 
-    showInfo("⏳ Searching for nearest facilities...<br><small>This may take 10-15 seconds</small>");
+    showInfo(`⏳ Searching for nearest facilities within ${maxDistanceKm}km...<br><small>This may take a few seconds</small>`);
 
     try {
-        // Build URL with correct backend - request routes too
-        const url = `${API_ENDPOINTS.nearestFacility}?lon=${lngLat.lng}&lat=${lngLat.lat}&type=${encodeURIComponent(facilityType)}&limit=${limit}&routes=true`;
+        // Build URL with distance limitation
+        const url = `${API_ENDPOINTS.nearestFacility}?lon=${lngLat.lng}&lat=${lngLat.lat}&type=${encodeURIComponent(facilityType)}&limit=${limit}&max_distance_km=${maxDistanceKm}&routes=true`;
 
         const data = await fetchWithTimeout(url);
 
@@ -422,7 +449,7 @@ async function calculateNearestFacilities(lngLat) {
         }
 
         if (!data.facilities || data.facilities.length === 0) {
-            showInfo(`ℹ️ No ${facilityType} found within network reach`);
+            showInfo(`ℹ️ No ${facilityType} found within ${maxDistanceKm}km radius`);
             return;
         }
 
@@ -581,7 +608,7 @@ function displayFacilityResults(lngLat, data, facilityType) {
     ).join('<br>');
     
     showInfo(`
-        ✅ Found ${data.count} ${facilityLabel}${data.count > 1 ? 's' : ''}
+        ✅ Found ${data.count} ${facilityLabel}${data.count > 1 ? 's' : ''} within ${state.searchDistanceKm}km
         <br><strong>Closest:</strong> ${facilityIcon} ${closestFacility.name}
         <br><strong>Travel time:</strong> ${closestFacility.travel_minutes} minutes
         ${closestFacility.crow_distance_km ? `<br><small>Straight-line: ${closestFacility.crow_distance_km.toFixed(1)} km</small>` : ''}

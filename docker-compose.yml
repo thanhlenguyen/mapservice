@@ -2,7 +2,7 @@
 
 services:
   postgis:
-    image: pgrouting/pgrouting:16-3.5-3.8               # PostGIS with pgRouting       
+    image: pgrouting/pgrouting:16-3.5-4.0               # PostGIS with pgRouting       
     container_name: postgis_db
     restart: unless-stopped
     env_file:
@@ -73,7 +73,7 @@ services:
         condition: service_healthy
         
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: dpage/pgadmin4:9.11.0
     container_name: pgadmin4
     restart: always
     env_file: 

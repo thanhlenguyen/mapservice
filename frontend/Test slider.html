@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Slider Test</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css" />
+    <style>
+        body {
+            padding: 2rem;
+            background: #f0f0f0;
+        }
+        .test-container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+        }
+        h2 {
+            margin-bottom: 1.5rem;
+            color: #1f2937;
+        }
+        .slider-demo {
+            background: white;
+            border-radius: 0.875rem;
+            border: 1px solid #e0f2fe;
+            box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.15);
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .visible-test {
+            display: block !important;
+            position: relative !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h2>Slider Visibility Test</h2>
+        
+        <div class="slider-demo visible-test">
+            <label class="slider-label">
+                Facility Count: <span id="test-count">5</span>
+            </label>
+            <input 
+                type="range" 
+                id="test-count-input" 
+                min="1" 
+                max="20" 
+                value="5" 
+                step="1"
+                class="range-slider"
+            />
+        </div>
+
+        <div class="slider-demo visible-test">
+            <label class="slider-label">
+                Search Radius: <span id="test-distance">10</span> km
+            </label>
+            <input 
+                type="range" 
+                id="test-distance-input" 
+                min="1" 
+                max="30" 
+                value="10" 
+                step="1"
+                class="range-slider"
+            />
+        </div>
+
+        <div class="slider-demo visible-test">
+            <label class="slider-label">
+                Service Time: <span id="test-time">5</span> min
+            </label>
+            <input 
+                type="range" 
+                id="test-time-input" 
+                min="1" 
+                max="20" 
+                value="5" 
+                step="1"
+                class="range-slider"
+            />
+        </div>
+    </div>
+
+    <script>
+        // Test slider functionality
+        document.getElementById('test-count-input').addEventListener('input', (e) => {
+            document.getElementById('test-count').textContent = e.target.value;
+        });
+
+        document.getElementById('test-distance-input').addEventListener('input', (e) => {
+            document.getElementById('test-distance').textContent = e.target.value;
+        });
+
+        document.getElementById('test-time-input').addEventListener('input', (e) => {
+            document.getElementById('test-time').textContent = e.target.value;
+        });
+
+        console.log('Sliders initialized');
+    </script>
+</body>
+</html>

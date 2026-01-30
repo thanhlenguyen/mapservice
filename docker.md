@@ -984,7 +984,7 @@ CREATE TABLE topology.ways AS
 WITH cleaned AS (
     SELECT
         row_number() OVER () AS id,
-        
+        regexp_replace(TRIM(regexp_replace(englishnam, E'[\u00A0\r\n\t]', ' ', 'g') ), '\s+', ' ', 'g') as name,
         CASE
             WHEN subtype = 2 THEN 120
             WHEN subtype = 1 THEN 100
@@ -1007,7 +1007,7 @@ WITH cleaned AS (
     WHERE geom IS NOT NULL
       AND ST_GeometryType(geom) != 'ST_Point'
 )
-SELECT id, speed_kmh, is_oneway, geom
+SELECT id, name, speed_kmh, is_oneway, geom
 		, ST_Length(ST_Transform(geom, 3857))::double precision AS length_m --Snapping tolerances and length calculations are much easier and safer in meters.
 		, NULL::bigint AS source
         , NULL::bigint AS target

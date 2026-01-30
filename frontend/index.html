@@ -21,7 +21,7 @@
 
     <div id="map">
 
-        <!-- Main floating control panel -->
+        <!-- Main floating control panel with all controls -->
         <div class="control-panel header">
             <div class="header-content">
                 <h1 class="title">Routing and Services Analysis Tool</h1>
@@ -42,7 +42,7 @@
                 </div>
                 
                 <!-- Facility type selector (shown only in facility mode) -->
-                <div id="facility-selector" class="hidden">
+                <div id="facility-selector" class="hidden mode-specific-controls">
                     <label for="facility-type-select">
                         Facility Type:
                     </label>
@@ -52,45 +52,66 @@
                         <option value="police">Police</option>
                     </select>
                 </div>
+
+                <!-- Facility sliders container (both sliders side by side) -->
+                <div id="facility-sliders-container" class="hidden mode-specific-controls">
+                    <div class="sliders-row">
+                        <!-- Facility count slider -->
+                        <div class="slider-column">
+                            <label class="slider-label">
+                                Find: <span id="facility-count-value">5</span> facilities
+                            </label>
+                            <input 
+                                type="range" 
+                                id="facility-count-input" 
+                                min="1" 
+                                max="10" 
+                                value="5" 
+                                step="1"
+                                class="range-slider"
+                            />
+                        </div>
+
+                        <!-- Search distance slider -->
+                        <div class="slider-column">
+                            <label class="slider-label">
+                                Radius: <span id="distance-value">10</span> km
+                            </label>
+                            <input 
+                                type="range" 
+                                id="distance-input" 
+                                min="1" 
+                                max="30" 
+                                value="10" 
+                                step="1"
+                                class="range-slider"
+                            />
+                        </div>
+                    </div>
+                </div>
+ 
+            <!-- Time range slider (shown in Service Area mode) -->
+            <div id="time-slider" class="hidden mode-specific-controls">
+                <label class="slider-label">
+                    Service Time: <span id="time-value">5</span> min
+                </label>
+                <input 
+                    type="range" 
+                    id="time-input" 
+                    min="1" 
+                    max="15" 
+                    value="5" 
+                    step="1"
+                    class="range-slider"
+                />
             </div>
+        </div>
 
             <p class="instruction" id="mode-instruction">
                 Click: <span class="highlight start">Start</span> →
                 <span class="highlight end">End</span>
             </p>
-        </div>
-
-        <!-- Facility count slider (shown in Nearest Facility mode) -->
-        <div id="facility-count-slider" class="control-panel slider-panel hidden">
-            <label class="slider-label">
-                Find: <span id="facility-count-value">5</span> facilities
-            </label>
-            <input 
-                type="range" 
-                id="facility-count-input" 
-                min="1" 
-                max="10" 
-                value="5" 
-                step="1"
-                class="range-slider"
-            />
-        </div>
-        
-        <!-- Time range slider (shown in Service Area mode) -->
-        <div id="time-slider" class="control-panel slider-panel hidden">
-            <label class="slider-label">
-                Service Time: <span id="time-value">5</span> min
-            </label>
-            <input 
-                type="range" 
-                id="time-input" 
-                min="1" 
-                max="15" 
-                value="5" 
-                step="1"
-                class="range-slider"
-            />
-        </div>
+        </div>    
 
         <!-- Result / info panel -->
         <div id="info-box" class="control-panel info-panel hidden">

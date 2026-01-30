@@ -1,4 +1,4 @@
-# app.py — Current VERSION
+# app.py — IMPROVED VERSION with Distance Limitation
 from flask import Flask, request, jsonify
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -526,6 +526,7 @@ def service_area():
 def nearest_facility():
     """
     Find nearest facilities using pgRouting with actual route geometries
+    IMPROVED: Added distance limitation for faster searches
     """
     try:
         # Parse and validate input
@@ -534,6 +535,7 @@ def nearest_facility():
         facility_type = request.args.get('type', 'hospital').lower()
         limit = request.args.get('limit', 5, type=int)
         max_minutes = request.args.get('max_minutes', type=float)
+        max_distance_km = request.args.get('max_distance_km', 10.0, type=float)  # NEW: Default 10km radius
         include_routes = request.args.get('routes', 'true').lower() == 'true'
 
         # Validate required params
@@ -545,6 +547,10 @@ def nearest_facility():
             lat = float(lat)
         except ValueError:
             return jsonify({"error": "Invalid lon/lat values"}), 400
+
+        # Validate distance limit (between 1 and 50 km)
+        if max_distance_km < 1 or max_distance_km > 50:
+            return jsonify({"error": "max_distance_km must be between 1 and 50"}), 400
 
         # Security: only allow supported types
         allowed_types = ['hospital', 'fire station', 'police', 'clinic']
@@ -558,7 +564,7 @@ def nearest_facility():
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
         # Set query timeout to prevent hanging
-        cur.execute("SET statement_timeout = '15s'")
+        cur.execute("SET statement_timeout = '60s'")
 
         # First, get the click point vertex
         cur.execute("""
@@ -574,7 +580,7 @@ def nearest_facility():
         
         click_vertex_id = click_vertex['id']
 
-        # Find nearby facilities and calculate costs
+        # IMPROVED: Find nearby facilities with DISTANCE LIMITATION
         query = """
             WITH click_point AS (
                 SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom
@@ -598,10 +604,10 @@ def nearest_facility():
                   AND ST_DWithin(
                       p.geom::geography,
                       cp.geom::geography,
-                      20000
+                      %s * 1000  -- Convert km to meters for ST_DWithin
                   )
                 ORDER BY p.geom <-> cp.geom
-                LIMIT 20
+                LIMIT %s  -- Limit initial candidates to 2x the requested limit
             )
             SELECT 
                 np.id,
@@ -629,7 +635,7 @@ def nearest_facility():
             WHERE d.agg_cost IS NOT NULL
         """
 
-        params = [lon, lat, facility_type, click_vertex_id]
+        params = [lon, lat, facility_type, max_distance_km, limit * 2, click_vertex_id]
 
         if max_minutes:
             max_seconds = max_minutes * 60
@@ -647,9 +653,10 @@ def nearest_facility():
             cur.close()
             conn.close()
             return jsonify({
-                "message": f"No {facility_type} found within network reach",
+                "message": f"No {facility_type} found within {max_distance_km}km radius",
                 "incident": {"lon": lon, "lat": lat},
                 "type": facility_type,
+                "search_radius_km": max_distance_km,
                 "count": 0,
                 "facilities": []
             }), 200
@@ -700,6 +707,7 @@ def nearest_facility():
         return jsonify({
             "incident": {"lon": lon, "lat": lat},
             "type": facility_type,
+            "search_radius_km": max_distance_km,
             "count": len(facilities_with_routes),
             "facilities": facilities_with_routes
         })
@@ -760,55 +768,5 @@ def test_facility():
             "traceback": traceback.format_exc()
         }), 500
     
-@app.route('/api/debug_places', methods=['GET'])
-def debug_places():
-    """Debug endpoint to check geometry types in places table"""
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        # Check geometry type of places table
-        cur.execute("""
-            SELECT 
-                type,
-                ST_GeometryType(geom) as geom_type,
-                COUNT(*) as count
-            FROM topology.places
-            WHERE type IN ('hospital', 'fire_station', 'police')
-            GROUP BY type, ST_GeometryType(geom)
-            ORDER BY type, count DESC;
-        """)
-        geom_types = cur.fetchall()
-        
-        # Get a sample hospital with its coordinates
-        cur.execute("""
-            SELECT 
-                id,
-                name,
-                type,
-                ST_GeometryType(geom) as geom_type,
-                ST_AsText(geom) as geom_text,
-                nearest_vertex_id
-            FROM topology.places
-            WHERE type = 'hospital'
-            LIMIT 3;
-        """)
-        sample_hospitals = cur.fetchall()
-        
-        cur.close()
-        conn.close()
-        
-        return jsonify({
-            "geometry_types": geom_types,
-            "sample_hospitals": sample_hospitals
-        })
-        
-    except Exception as e:
-        import traceback
-        return jsonify({
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }), 500
-
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
