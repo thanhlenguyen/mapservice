@@ -40,7 +40,24 @@
                         🚚 Service Area
                     </button>
                 </div>
-                
+
+                <!-- Route optimization selector (shown only in route mode) -->
+                <div id="route-options" class="hidden mode-specific-controls">
+                    <label class="route-option-label">Route Optimization:</label>
+                    <div class="route-option-buttons">
+                        <button id="opt-fastest" class="route-opt-btn active" type="button">
+                            ⚡ Fastest
+                        </button>
+                        <button id="opt-shortest" class="route-opt-btn" type="button">
+                            📏 Shortest
+                        </button>
+                    </div>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="show-alternatives" checked />
+                        Show 3 alternative routes
+                    </label>
+                </div>
+                  
                 <!-- Facility type selector (shown only in facility mode) -->
                 <div id="facility-selector" class="hidden mode-specific-controls">
                     <label for="facility-type-select">
