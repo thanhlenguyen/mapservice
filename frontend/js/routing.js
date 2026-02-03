@@ -8,6 +8,19 @@ const STYLES = [
     { id: '3d-style',    name: '3D',        url: 'http://localhost:3001/styles/martin/style_3d.json', pitch: 45, zoom: 14, bearing: 0 }
 ];
 
+// Backend API configuration
+const BACKEND_URL = 'http://localhost:5000';
+
+const API_ENDPOINTS = {
+    route: `${BACKEND_URL}/route`,
+    tsp: `${BACKEND_URL}/route/tsp`,
+    nearestFacility: `${BACKEND_URL}/nearest_facility`,
+    serviceArea: `${BACKEND_URL}/service_area`
+};
+const DEFAULT_CENTER = [46.6167, 24.8258]; // Riyadh
+const DEFAULT_ZOOM = 12;
+const REQUEST_TIMEOUT = 20000; // 20 seconds
+
 const FACILITY_COLORS = {
     'hospital': '#ef4444',
     'fire station': '#f97316',
@@ -21,19 +34,6 @@ const FACILITY_ICONS = {
     'police': '👮',
     'clinic': '⚕️'
 };
-
-// Backend API configuration
-const BACKEND_URL = 'http://localhost:5000';
-
-const API_ENDPOINTS = {
-    route: `${BACKEND_URL}/route`,
-    nearestFacility: `${BACKEND_URL}/nearest_facility`,
-    serviceArea: `${BACKEND_URL}/service_area`
-};
-
-const DEFAULT_CENTER = [46.6167, 24.8258]; // Riyadh
-const DEFAULT_ZOOM = 12;
-const REQUEST_TIMEOUT = 20000; // 20 seconds
 
 // Global limits for sliders - CHANGE THESE TO UPDATE MAX VALUES
 const MAX_FACILITY_COUNT = 20;  // Maximum facilities to search
@@ -62,7 +62,9 @@ const state = {
     currentRouteData: null,
     serviceMinutes: 5,
     facilityCount: 5,  // Default number of facilities to find
-    searchDistanceKm: 10 // Default search distance in kilometers
+    searchDistanceKm: 10, // Default search distance in kilometers
+    routeOptimization: 'fastest',  // 'fastest' or 'shortest'
+    showAlternatives: true  // Show 3 alternative routes
     };
 
 // ============================================================================
@@ -141,6 +143,34 @@ function setupEventHandlers() {
     document.getElementById('mode-facility')?.addEventListener('click', () => switchMode('facility'));
     document.getElementById('mode-service')?.addEventListener('click', () => switchMode('service'));
 
+        // Route optimization buttons
+    document.getElementById('opt-fastest')?.addEventListener('click', () => {
+        state.routeOptimization = 'fastest';
+        updateRouteOptButtons();
+        // Recalculate if route exists
+        if (state.markers.start && state.markers.end) {
+            calculateRoute(state.markers.start.getLngLat(), state.markers.end.getLngLat());
+        }
+    });
+
+    document.getElementById('opt-shortest')?.addEventListener('click', () => {
+        state.routeOptimization = 'shortest';
+        updateRouteOptButtons();
+        // Recalculate if route exists
+        if (state.markers.start && state.markers.end) {
+            calculateRoute(state.markers.start.getLngLat(), state.markers.end.getLngLat());
+        }
+    });
+
+    // Show alternatives checkbox
+    document.getElementById('show-alternatives')?.addEventListener('change', (e) => {
+        state.showAlternatives = e.target.checked;
+        // Recalculate if route exists
+        if (state.markers.start && state.markers.end) {
+            calculateRoute(state.markers.start.getLngLat(), state.markers.end.getLngLat());
+        }
+    });
+
 // Time slider for service area
     const timeInput = document.getElementById('time-input');
     const timeValue = document.getElementById('time-value');
@@ -195,6 +225,18 @@ function setupEventHandlers() {
     }
 }
 
+function updateRouteOptButtons() {
+    document.querySelectorAll('.route-opt-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    if (state.routeOptimization === 'fastest') {
+        document.getElementById('opt-fastest')?.classList.add('active');
+    } else {
+        document.getElementById('opt-shortest')?.classList.add('active');
+    }
+}
+
 function handleMapClick(e) {
     const handlers = {
         'route': handleRouteClick,
@@ -237,6 +279,7 @@ function updateModeInstructions(mode) {
     const timeSlider = document.getElementById('time-slider');
     const facilitySelector = document.getElementById('facility-selector');
     const facilitySlidersContainer = document.getElementById('facility-sliders-container');
+    const routeOptions = document.getElementById('route-options');
     const instruction = document.getElementById('mode-instruction');
 
     if (timeSlider) {
@@ -249,6 +292,10 @@ function updateModeInstructions(mode) {
 
     if (facilitySlidersContainer) {
         facilitySlidersContainer.classList.toggle('hidden', mode !== 'facility');
+    }
+    
+    if (routeOptions) {
+        routeOptions.classList.toggle('hidden', mode !== 'route');
     }
 
     const instructions = {
@@ -303,23 +350,104 @@ function handleRouteClick(lngLat) {
 }
 
 async function calculateRoute(start, end) {
-    showInfo("⏳ Calculating route...");
+    showInfo("⏳ Calculating routes...");
 
     try {
-        const url = `${API_ENDPOINTS.route}?start_lon=${start.lng}&start_lat=${start.lat}&end_lon=${end.lng}&end_lat=${end.lat}`;
+        const alternatives = state.showAlternatives ? 3 : 1;
+        const optimization = state.routeOptimization; // 'fastest' or 'shortest'
+        
+        const url = `${API_ENDPOINTS.route}?start_lon=${start.lng}&start_lat=${start.lat}&end_lon=${end.lng}&end_lat=${end.lat}&alternatives=${alternatives}&optimization=${optimization}`;
         const data = await fetchWithTimeout(url);
 
         if (data.error) {
             throw new Error(data.error);
         }
 
-        state.currentRouteData = data;
-        addRouteLayer(data, '#3b82f6');
-        fitToFeatures(data);
-        showInfo(`✅ Route: ${data.duration_minutes} min • ${data.total_distance_km} km`);
+        // Handle multiple routes
+        if (data.routes && Array.isArray(data.routes)) {
+            // Clear old routes
+            clearRouteLayers();
+            
+            // Add all routes with different colors
+            data.routes.forEach((route, index) => {
+                const color = getRouteColor(index);
+                const opacity = index === 0 ? 0.9 : 0.6;
+                const width = index === 0 ? 7 : 5;
+                addRouteLayer(route, color, opacity, width, `route-${index}`);
+            });
+            
+            state.currentRouteData = data.routes;
+            
+            // Fit map to show all routes
+            fitToMultipleRoutes(data.routes);
+            
+            // Build summary
+            const primaryRoute = data.routes[0];
+            let summary = `✅ <strong>Best ${optimization} route:</strong> ${primaryRoute.duration_minutes} min • ${primaryRoute.total_distance_km} km`;
+            
+            if (data.routes.length > 1) {
+                summary += `<br><small>Showing ${data.routes.length} alternative routes</small>`;
+                data.routes.slice(1).forEach((route, idx) => {
+                    summary += `<br><small style="color:#60a5fa;">Route ${idx + 2}: ${route.duration_minutes} min • ${route.total_distance_km} km</small>`;
+                });
+            }
+            
+            showInfo(summary);
+        } else {
+            // Single route (backward compatibility)
+            state.currentRouteData = data;
+            clearRouteLayers();
+            addRouteLayer(data, '#3b82f6', 0.9, 7, 'route-0');
+            fitToFeatures(data);
+            showInfo(`✅ Route: ${data.duration_minutes} min • ${data.total_distance_km} km`);
+        }
     } catch (error) {
         handleError('Route calculation', error);
     }
+}
+
+function getRouteColor(index) {
+    const colors = [
+        '#0865fc',  // Primary: Blue
+        '#4f9af7',  // Alternative 1: Light blue
+        '#6095d3'   // Alternative 2: Lighter blue
+    ];
+    return colors[index] || '#5e8bbe';
+}
+
+function clearRouteLayers() {
+    // Remove all route layers and sources
+    for (let i = 0; i < 5; i++) {
+        const layerId = `route-${i}`;
+        if (state.map.getLayer(layerId)) {
+            state.map.removeLayer(layerId);
+        }
+        if (state.map.getSource(layerId)) {
+            state.map.removeSource(layerId);
+        }
+    }
+    
+    // Also remove old single route layer for backward compatibility
+    if (state.map.getLayer('route')) state.map.removeLayer('route');
+    if (state.map.getSource('route')) state.map.removeSource('route');
+}
+
+function fitToMultipleRoutes(routes) {
+    const bounds = new maplibregl.LngLatBounds();
+    
+    routes.forEach(route => {
+        route.features.forEach(feature => {
+            if (feature.geometry?.coordinates) {
+                feature.geometry.coordinates.forEach(coord => bounds.extend(coord));
+            }
+        });
+    });
+    
+    state.map.fitBounds(bounds, { 
+        padding: 80, 
+        maxZoom: 15, 
+        duration: 1500 
+    });
 }
 
 // ============================================================================
@@ -359,7 +487,7 @@ async function calculateTSP() {
     try {
         const points = state.markers.tsp.map(m => [m.lngLat.lng, m.lngLat.lat]);
         
-        const data = await fetchWithTimeout(API_ENDPOINTS.route, {
+        const data = await fetchWithTimeout(API_ENDPOINTS.tsp, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ points })
@@ -370,7 +498,8 @@ async function calculateTSP() {
         }
 
         state.currentRouteData = data;
-        addRouteLayer(data, '#9333ea');
+        clearRouteLayers();
+        addRouteLayer(data, '#9333ea', 0.9, 7, 'route-0');
         fitToFeatures(data);
 
         const orderStr = data.waypoint_order.map(i => i + 1).join(' → ');
@@ -796,20 +925,20 @@ function showInfo(text) {
     }
 }
 
-function addRouteLayer(data, color) {
-    if (state.map.getLayer('route')) state.map.removeLayer('route');
-    if (state.map.getSource('route')) state.map.removeSource('route');
+function addRouteLayer(data, color, opacity = 0.9, width = 7, layerId = 'route') {
+    if (state.map.getLayer(layerId)) state.map.removeLayer(layerId);
+    if (state.map.getSource(layerId)) state.map.removeSource(layerId);
 
-    state.map.addSource('route', { type: 'geojson', data });
+    state.map.addSource(layerId, { type: 'geojson', data });
     state.map.addLayer({
-        id: 'route',
+        id: layerId,
         type: 'line',
-        source: 'route',
+        source: layerId,
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: { 
             'line-color': color, 
-            'line-width': 7, 
-            'line-opacity': 0.9 
+            'line-width': width, 
+            'line-opacity': opacity 
         }
     });
 }
@@ -831,9 +960,11 @@ function fitToFeatures(data) {
 }
 
 function clearAll() {
-    // Remove all layers
+    // Clear route layers
+    clearRouteLayers();
+    
+    // Remove all other layers
     const layersToRemove = [
-        'route',
         'service-network',
         'service-hull',
         'service-border',
@@ -848,7 +979,6 @@ function clearAll() {
 
     // Remove all sources
     const sourcesToRemove = [
-        'route',
         'service-network',
         'service-hull',
         'facility-routes'
