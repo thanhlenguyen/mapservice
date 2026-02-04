@@ -64,7 +64,15 @@ const state = {
     facilityCount: 5,  // Default number of facilities to find
     searchDistanceKm: 10, // Default search distance in kilometers
     routeOptimization: 'fastest',  // 'fastest' or 'shortest'
-    showAlternatives: true  // Show 3 alternative routes
+    showAlternatives: true,  // Show 3 alternative routes
+    // Info pointer state
+    infoPointerActive: false,
+    highlightedFeatureId: null,
+    highlightedSourceLayer: null,
+    // Draggable panel state
+    isDragging: false,
+    dragOffset: { x: 0, y: 0 },
+    panelPosition: null
     };
 
 // ============================================================================
@@ -93,6 +101,7 @@ function initMap() {
     // Add controls
     state.map.addControl(new maplibregl.NavigationControl(), 'top-right');
     state.map.addControl(createLayerSwitcher(), 'bottom-right');
+    state.map.addControl(createInfoPointerToggle(), 'top-right');
     
     // Initialize sliders with global limits
     initializeSliders();
@@ -102,7 +111,374 @@ function initMap() {
 
     state.map.on('load', () => {
         showInfo("Click anywhere to begin");
+        setupInfoPointerLayers();
     });
+    
+    // Handle style changes
+    state.map.on('styledata', () => {
+        // Recreate info pointer layers after style change
+        if (state.infoPointerActive) {
+            setupInfoPointerLayers();
+        }
+    });
+}
+
+// ============================================================================
+// INFO POINTER FUNCTIONALITY
+// ============================================================================
+
+function createInfoPointerToggle() {
+    class InfoPointerControl {
+        onAdd(map) {
+            this.map = map;
+            this.container = document.createElement('div');
+            this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group info-pointer-toggle';
+            
+            this.button = document.createElement('button');
+            this.button.className = 'info-pointer-btn';
+            this.button.type = 'button';
+            this.button.innerHTML = 'ℹ️';
+            this.button.title = 'Toggle Info Pointer';
+            
+            this.button.onclick = () => toggleInfoPointer();
+            
+            this.container.appendChild(this.button);
+            return this.container;
+        }
+        
+        onRemove() {
+            this.container.parentNode.removeChild(this.container);
+        }
+    }
+    return new InfoPointerControl();
+}
+
+function toggleInfoPointer() {
+    state.infoPointerActive = !state.infoPointerActive;
+    
+    const btn = document.querySelector('.info-pointer-btn');
+    const mapContainer = document.getElementById('map');
+    const featurePanel = document.getElementById('feature-info-panel');
+    
+    if (state.infoPointerActive) {
+        btn.classList.add('active');
+        mapContainer.classList.add('info-pointer-active');
+        featurePanel.classList.remove('hidden');
+        
+        // Reset panel position to default
+        resetPanelPosition();
+        
+        // Setup draggable functionality
+        setupDraggablePanel();
+        
+        // Clear any existing highlights
+        clearFeatureHighlight();
+        
+        // Show hint
+        updateFeatureInfo({
+            html: '<p class="info-hint">Click on any feature to see its details</p>'
+        });
+    } else {
+        btn.classList.remove('active');
+        mapContainer.classList.remove('info-pointer-active');
+        featurePanel.classList.add('hidden');
+        
+        // Clear highlights
+        clearFeatureHighlight();
+    }
+}
+
+function setupInfoPointerLayers() {
+    // Wait for map to be fully loaded
+    if (!state.map.isStyleLoaded()) {
+        state.map.once('styledata', setupInfoPointerLayers);
+        return;
+    }
+
+    // Add highlight layer for selected features
+    if (!state.map.getSource('feature-highlight')) {
+        state.map.addSource('feature-highlight', {
+            type: 'geojson',
+            data: {
+                type: 'FeatureCollection',
+                features: []
+            }
+        });
+    }
+
+    // Add highlight layers for different geometry types
+    const highlightLayers = [
+        {
+            id: 'feature-highlight-fill',
+            type: 'fill',
+            filter: ['==', ['geometry-type'], 'Polygon'],
+            paint: {
+                'fill-color': '#3b82f6',
+                'fill-opacity': 0.3
+            }
+        },
+        {
+            id: 'feature-highlight-line',
+            type: 'line',
+            filter: ['any', 
+                ['==', ['geometry-type'], 'LineString'],
+                ['==', ['geometry-type'], 'Polygon']
+            ],
+            paint: {
+                'line-color': '#3b82f6',
+                'line-width': 3,
+                'line-opacity': 0.8
+            }
+        },
+        {
+            id: 'feature-highlight-point',
+            type: 'circle',
+            filter: ['==', ['geometry-type'], 'Point'],
+            paint: {
+                'circle-radius': 8,
+                'circle-color': '#3b82f6',
+                'circle-opacity': 0.6,
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#1e40af'
+            }
+        }
+    ];
+
+    highlightLayers.forEach(layer => {
+        if (!state.map.getLayer(layer.id)) {
+            state.map.addLayer({
+                ...layer,
+                source: 'feature-highlight'
+            });
+        }
+    });
+}
+
+// ============================================================================
+// DRAGGABLE PANEL FUNCTIONALITY
+// ============================================================================
+
+function setupDraggablePanel() {
+    const panel = document.getElementById('feature-info-panel');
+    const header = document.querySelector('.feature-info-header');
+    
+    if (!panel || !header) return;
+    
+    let isDragging = false;
+    let currentX;
+    let currentY;
+    let initialX;
+    let initialY;
+    
+    header.addEventListener('mousedown', dragStart);
+    document.addEventListener('mousemove', drag);
+    document.addEventListener('mouseup', dragEnd);
+    
+    // Touch support
+    header.addEventListener('touchstart', dragStart, { passive: false });
+    document.addEventListener('touchmove', drag, { passive: false });
+    document.addEventListener('touchend', dragEnd);
+    
+    function dragStart(e) {
+        // Don't drag if clicking the close button
+        if (e.target.closest('.close-btn')) return;
+        
+        if (e.type === 'touchstart') {
+            initialX = e.touches[0].clientX - (state.panelPosition?.x || 0);
+            initialY = e.touches[0].clientY - (state.panelPosition?.y || 0);
+        } else {
+            initialX = e.clientX - (state.panelPosition?.x || 0);
+            initialY = e.clientY - (state.panelPosition?.y || 0);
+        }
+        
+        isDragging = true;
+        state.isDragging = true;
+    }
+    
+    function drag(e) {
+        if (!isDragging) return;
+        
+        e.preventDefault();
+        
+        if (e.type === 'touchmove') {
+            currentX = e.touches[0].clientX - initialX;
+            currentY = e.touches[0].clientY - initialY;
+        } else {
+            currentX = e.clientX - initialX;
+            currentY = e.clientY - initialY;
+        }
+        
+        // Constrain to viewport
+        const maxX = window.innerWidth - panel.offsetWidth;
+        const maxY = window.innerHeight - panel.offsetHeight;
+        
+        currentX = Math.max(0, Math.min(currentX, maxX));
+        currentY = Math.max(0, Math.min(currentY, maxY));
+        
+        state.panelPosition = { x: currentX, y: currentY };
+        
+        panel.style.left = 'auto';
+        panel.style.right = 'auto';
+        panel.style.top = 'auto';
+        panel.style.transform = `translate(${currentX}px, ${currentY}px)`;
+    }
+    
+    function dragEnd() {
+        isDragging = false;
+        state.isDragging = false;
+    }
+}
+
+function resetPanelPosition() {
+    const panel = document.getElementById('feature-info-panel');
+    if (panel) {
+        panel.style.left = 'auto';
+        panel.style.right = '1rem';
+        panel.style.top = '1rem';
+        panel.style.transform = 'none';
+        state.panelPosition = null;
+    }
+}
+
+function handleInfoPointerClick(e) {
+    if (!state.infoPointerActive) return;
+    
+    // Don't process click if we were just dragging
+    if (state.isDragging) return;
+
+    // Query all visible features at click point
+    const features = state.map.queryRenderedFeatures(e.point);
+    
+    if (!features || features.length === 0) {
+        clearFeatureHighlight();
+        updateFeatureInfo({
+            html: '<p class="info-hint">No features found at this location</p>'
+        });
+        return;
+    }
+
+    // Filter out our own highlight and route layers
+    const validFeatures = features.filter(f => {
+        const layerId = f.layer.id;
+        return !layerId.startsWith('feature-highlight') &&
+               !layerId.startsWith('route') &&
+               !layerId.startsWith('service-') &&
+               !layerId.startsWith('facility-');
+    });
+
+    if (validFeatures.length === 0) {
+        clearFeatureHighlight();
+        updateFeatureInfo({
+            html: '<p class="info-hint">No base layer features at this location</p>'
+        });
+        return;
+    }
+
+    // Get the topmost feature
+    const feature = validFeatures[0];
+    
+    // Highlight the feature
+    highlightFeature(feature);
+    
+    // Display feature information
+    displayFeatureInfo(feature);
+}
+
+function highlightFeature(feature) {
+    // Clear previous highlight
+    clearFeatureHighlight();
+    
+    // Store current highlight info
+    state.highlightedFeatureId = feature.id;
+    state.highlightedSourceLayer = feature.sourceLayer;
+    
+    // Update highlight source
+    const highlightSource = state.map.getSource('feature-highlight');
+    if (highlightSource) {
+        highlightSource.setData({
+            type: 'FeatureCollection',
+            features: [feature]
+        });
+    }
+}
+
+function clearFeatureHighlight() {
+    state.highlightedFeatureId = null;
+    state.highlightedSourceLayer = null;
+    
+    const highlightSource = state.map.getSource('feature-highlight');
+    if (highlightSource) {
+        highlightSource.setData({
+            type: 'FeatureCollection',
+            features: []
+        });
+    }
+}
+
+function displayFeatureInfo(feature) {
+    const properties = feature.properties || {};
+    const layer = feature.layer.id;
+    const sourceLayer = feature.sourceLayer || 'N/A';
+    const geometryType = feature.geometry.type;
+    
+    let html = `
+        <div class="feature-layer-info">
+            <p><strong>Layer:</strong> ${layer}</p>
+            <p><strong>Source Layer:</strong> ${sourceLayer}</p>
+            <p><strong>Geometry:</strong> ${geometryType}</p>
+        </div>
+    `;
+    
+    if (Object.keys(properties).length > 0) {
+        html += '<div class="feature-properties">';
+        
+        // Sort properties for better display
+        const sortedKeys = Object.keys(properties).sort();
+        
+        sortedKeys.forEach(key => {
+            const value = properties[key];
+            
+            // Skip null/undefined values
+            if (value === null || value === undefined) return;
+            
+            // Format the value
+            let formattedValue = value;
+            if (typeof value === 'object') {
+                formattedValue = JSON.stringify(value);
+            } else if (typeof value === 'number') {
+                formattedValue = value.toLocaleString();
+            }
+            
+            html += `
+                <div class="feature-property">
+                    <span class="property-key">${formatPropertyKey(key)}</span>
+                    <span class="property-value">${formattedValue}</span>
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+    } else {
+        html += '<p class="info-hint">No properties available for this feature</p>';
+    }
+    
+    updateFeatureInfo({ html });
+}
+
+function formatPropertyKey(key) {
+    // Convert snake_case or camelCase to Title Case
+    return key
+        .replace(/_/g, ' ')
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/^./, str => str.toUpperCase())
+        .trim();
+}
+
+function updateFeatureInfo({ html }) {
+    const content = document.getElementById('feature-info-content');
+    if (content) {
+        content.innerHTML = html;
+    }
 }
 
 // ============================================================================
@@ -135,7 +511,20 @@ function initializeSliders() {
 
 function setupEventHandlers() {
     // Map click handler
-    state.map.on('click', handleMapClick);
+    state.map.on('click', (e) => {
+        // Handle info pointer click first
+        if (state.infoPointerActive) {
+            handleInfoPointerClick(e);
+        } else {
+            handleMapClick(e);
+        }
+    });
+
+    // Close feature info panel
+    document.getElementById('close-feature-info')?.addEventListener('click', () => {
+        state.infoPointerActive = false;
+        toggleInfoPointer();
+    });
 
     // Mode switcher buttons
     document.getElementById('mode-route')?.addEventListener('click', () => switchMode('route'));
@@ -262,6 +651,11 @@ function switchMode(mode) {
     // Update UI
     updateModeButtons(mode);
     updateModeInstructions(mode);
+        
+    // Disable info pointer when switching modes
+    if (state.infoPointerActive) {
+        toggleInfoPointer();
+    }
 }
 
 function updateModeButtons(activeMode) {
@@ -1011,6 +1405,12 @@ function clearAll() {
 
     // Reset data
     state.currentRouteData = null;
+        
+    // Clear feature highlight if active
+    if (state.infoPointerActive) {
+        clearFeatureHighlight();
+    }
+    
     showInfo("Click to start");
 }
 
