@@ -331,6 +331,161 @@ body {
 }
 
 /* ==========================================================================
+   FEATURE INFO PANEL (Info Pointer Mode)
+   ========================================================================== */
+.control-panel.feature-info-panel {
+    top: 1rem;
+    right: 1rem;
+    left: auto;
+    transform: none;
+    z-index: 25;
+    min-width: 320px;
+    max-width: 400px;
+    max-height: 80vh;
+    overflow: visible;
+    padding: 0;
+    position: fixed;
+}
+
+.feature-info-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f9fafb;
+    border-radius: 0.875rem 0.875rem 0 0;
+    cursor: move;
+    cursor: grab;
+    user-select: none;
+}
+
+.feature-info-header:active {
+    cursor: grabbing;
+}
+
+.feature-info-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1f2937;
+    margin: 0;
+    pointer-events: none;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25rem;
+    transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+    background: #e5e7eb;
+    color: #1f2937;
+}
+
+.feature-info-content {
+    padding: 1rem 1.5rem;
+    max-height: calc(80vh - 60px);
+    overflow-y: auto;
+}
+
+.info-hint {
+    color: #6b7280;
+    font-size: 0.9rem;
+    font-style: italic;
+    margin: 0;
+}
+
+.feature-property {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.feature-property:last-child {
+    border-bottom: none;
+}
+
+.property-key {
+    font-weight: 600;
+    color: #4b5563;
+    font-size: 0.85rem;
+    text-transform: capitalize;
+}
+
+.property-value {
+    color: #1f2937;
+    font-size: 0.85rem;
+    text-align: right;
+    max-width: 60%;
+    word-break: break-word;
+}
+
+.feature-layer-info {
+    background: #eff6ff;
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.feature-layer-info p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #1e40af;
+}
+
+.feature-layer-info strong {
+    color: #1e3a8a;
+}
+
+/* ==========================================================================
+   INFO POINTER TOGGLE BUTTON
+   ========================================================================== */
+.info-pointer-toggle {
+    position: absolute;
+    top: 90px;
+    right: 0.5px;
+    z-index: 10;
+}
+
+.info-pointer-btn {
+    background: white;
+    border: 2px solid rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    width: 29px;
+    height: 29px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+}
+
+.info-pointer-btn:hover {
+    background: #f0f9ff;
+    border-color: #3b82f6;
+}
+
+.info-pointer-btn.active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: white;
+}
+
+/* ==========================================================================
    MAP MARKERS
    ========================================================================== */
 .marker {
@@ -369,6 +524,11 @@ body {
     overflow: visible;
 }
 
+/* Cursor styles for info pointer mode */
+#map.info-pointer-active {
+    cursor: default;
+}
+
 /* ==========================================================================
    UTILITIES
    ========================================================================== */
@@ -387,6 +547,8 @@ body {
 /* But keep ALL interactive elements in header clickable */
 .control-panel.header,
 .control-panel.header *,
+.control-panel.feature-info-panel,
+.control-panel.feature-info-panel *,
 #info-box,
 #info-box * {
     pointer-events: auto;
@@ -447,6 +609,13 @@ body {
     #distance-value,
     #time-value {
         font-size: 1rem;
+    }
+    
+    /* Feature info panel adjustments */
+    .control-panel.feature-info-panel {
+        min-width: 280px;
+        max-width: calc(100vw - 2rem);
+        right: 1rem;
     }
 }
 
