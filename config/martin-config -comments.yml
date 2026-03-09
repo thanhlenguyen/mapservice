@@ -1,0 +1,211 @@
+# Connection keep alive timeout [default: 75]
+keep_alive: 75
+
+# The socket address to bind [default: 0.0.0.0:3000]
+listen_addresses: '0.0.0.0:3000'
+
+# Set TileJSON URL path prefix.
+# This overrides the default of respecting the X-Rewrite-URL header.
+# Only modifies the JSON (TileJSON) returned; Martin's API-URLs remain unchanged.
+# If you need to rewrite URLs, please use a reverse proxy.
+# Must begin with a `/`.
+# Examples: `/`, `/tiles`
+base_path: /tiles
+
+# Number of web server workers
+worker_processes: 8
+
+# Amount of memory (in MB) to use for caching tiles [default: 512, 0 to disable]
+cache_size_mb: 1024
+
+# Which compression should be used if the
+# - client accepts multiple compression formats, and
+# - tile source is not pre-compressed.
+#
+# `gzip` is faster, but `brotli` is smaller, and may be faster with caching.
+# Default could be different depending on Martin version.
+preferred_encoding: gzip
+
+# Enable or disable Martin web UI. [default: disable]
+#
+# At the moment, only allows `enable-for-all`, which enables the web UI for all connections.
+# This may be undesirable in a production environment
+web_ui: enable-for-all
+
+# Advanced monitoring options
+observability:
+  # Configure metrics reported under `/_/metrics`
+  metrics:
+    # Add these labels to every metric
+    # Example: `{ env: prod, server: martin }`
+    add_labels: {}
+
+# CORS Configuration
+#
+# Defaults to `cors: true`, which allows all origins.
+# Sending/Acting on CORS headers can be completely disabled via `cors: false`
+cors: 
+  # Sets the `Access-Control-Allow-Origin` header [default: *]
+  # '*' will use the requests `ORIGIN` header
+  origin: 
+    - "*"
+  # Sets `Access-Control-Max-Age` Header. [default: null]
+  # null means not setting the header for preflight requests
+  max_age: 3600
+
+# Database configuration. This can also be a list of PG configs.
+postgres:
+  # Database connection string.
+  #
+  # You can use environment variables too, for example:
+  # connection_string: $DATABASE_URL
+  # connection_string: ${DATABASE_URL:-postgres://postgres@localhost/db}
+  connection_string: 'postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable'
+  default_srid: 4326
+  # Enable automatic discovery of tables and functions.
+  # Enable automatic discovery of tables
+  auto_publish:
+    tables:
+      # Limit to the topology schema
+      from_schemas:
+        - topology
+      # Define source ID format
+      source_id_format: '{schema}.{table}'
+      # Assume geometry column is named 'geom'
+      id_columns: id
+      clip_geom: true
+      buffer: 64
+      extent: 4096
+      # bounds: [38, 20, 47, 27]
+  # Define the tables to be published as vector tile layers.
+  # tables:     
+  #   - table: topology.places
+  #     srid: 4326
+  #     geometry_column: geom
+  #     id_column: id
+  #     minzoom: 0
+  #     maxzoom: 14
+  #     bounds: [-180, -85, 180, 85] 
+
+# ---- Optional: expose the whole DB (only for demo) -------------------------
+#  all_tables:
+#    type: postgis
+#    uri: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable"
+#    schema: public
+
+# Publish PMTiles files from local disk or proxy to a web server
+pmtiles:
+  # Size of the directory cache (in MB).
+  # Defaults to cache_size_mb / 4
+  #
+  # Note:
+  # Tile and directory caching are complementary.
+  # For good performance, you want
+  # - directory caching (to not resolve the directory on each request) and
+  # - tile caching (for high access tiles)
+  directory_cache_size_mb: 128
+
+  # You can pass options for pmtiles files located on remote storages here.
+  #
+  # The avaliable options are documented here:
+  # - local file sources don't have options
+  # - Http(s) Source: https://docs.rs/object_store/latest/object_store/http/struct.HttpBuilder.html
+  # - Amazon S3: https://docs.rs/object_store/latest/object_store/aws/struct.AmazonS3Builder.html
+  # - Google Cloud Storage: https://docs.rs/object_store/latest/object_store/gcp/struct.GoogleCloudStorageBuilder.html
+  # - Microsoft Azure: https://docs.rs/object_store/latest/object_store/azure/struct.MicrosoftAzureBuilder.html
+  #
+  # Example for configuring a source to allow http
+  allow_http: true
+
+  paths:
+  #   # scan this whole dir, matching all *.pmtiles files
+    # - /data/pmtiles
+  #   # specific pmtiles file will be published as a pmt source (filename without extension)
+  #   # - /path/to/pmt.pmtiles
+  #   # A web server with a PMTiles file that supports range requests
+  #   # - https://example.org/path/tiles.pmtiles
+  sources:
+    # named source matching source name to a single file
+    # administrative: /administrative.pmtiles
+    # city_district_zone: /city_district_zone.pmtiles
+    # address_layer: address_layer.pmtiles
+    # street_centerline:  /street_centerline.pmtiles
+    # A named source to a web server with a PMTiles file that supports range requests
+    # pm-web2: https://example.org/path/tiles.pmtiles
+
+# Publish MBTiles files
+mbtiles:
+  paths:
+    # scan this whole dir, matching all *.mbtiles files
+    # - /data/mbtiles
+    # specific mbtiles file will be published as mbtiles2 source
+    # - /path/to/mbtiles.mbtiles
+  sources:
+    # named source matching source name to a single file
+    Administrative: /mbtiles/Administrative.mbtiles
+    City_District_Zone: /mbtiles/City_District_Zone.mbtiles
+    address_layer: /mbtiles/address_layer.mbtiles
+    street_centerline:  /mbtiles/street_centerline.mbtiles
+
+# Sprite configuration
+sprites:
+  # Size of the sprite cache (in MB).
+  # Defaults to cache_size_mb / 8
+  cache_size_mb: 64
+
+  paths:
+    # all SVG files in this dir will be published as a "my_images" sprite source
+    # - /data/sprites
+  sources:
+    # SVG images in this directory will be published as a "my_sprites" sprite source
+    # my_sprites: /path/to/some_dir
+
+# Font configuration
+fonts:
+  # Size of the sprite cache (in MB).
+  # Defaults to cache_size_mb / 4
+  cache_size_mb: 64
+
+  # A list of *.otf, *.ttf, and *.ttc font files and dirs to search recursively.
+  paths:
+    # - /data/fonts
+   
+
+# Publish MapLibre style files
+# In the future, the style files will be used for the server-side rendering as well
+styles:
+  paths:
+    # publish all *.json files in this directory
+    # The name of the file will be used as the style name
+    - /styles
+    # publish a single file - here `maplibre_style` will be the style name
+    # - /path/to/maplibre_style.json
+  sources:
+    # publish a JSON file found at this path as `some_style_name`
+    #
+    # Contrairy to paths, if directories are specified, Martin will print a
+    # warning and ignore them.
+    # To serve a style-directory, use the `paths` section above or name each
+    # style individually. This prevents footguns with names being unclear.
+    basic-style: /styles/martin/style.json
+    sat-style: /styles/martin/style_sat.json
+    3d-style: /styles/martin/style_3d.json
+
+# If set, the version of the tileset (as specified in the MBTiles or PMTiles metadata)
+# will be embedded in the TileJSON `tiles` URL, with the set identifier.
+# This is useful to give clients a better way to cache-bust a CDN:
+# 1. maplibre requests tilejson, tilejson contains the tiles URL. This is always up-to-date.
+# 2. maplibre requests each tile it requires, with the tiles URL in the tilejson.
+# 3. Add `Control: public, max-age=..., immutable` on the tile responses
+#    optimize browser/CDN cache hit rates, while also making sure that
+#    old tiles aren't served when a new tileset is deployed.
+#
+# The CDN must handle query parameters for caching to work correctly.
+# Many CDNs ignore them by default.
+#
+# For example, if
+# - the setting here is `version`, and
+# - the PMTiles tileset version is `1.0.0`, the
+# TileJSON will be:
+# { ..., "tiles": [".../{z}/{x}/{y}?version=1.0.0"], ... }
+tilejson_url_version_param: null # a string, such as `version` or `v`

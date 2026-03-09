@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>KSA Route & Service Analysis</title>
+
+    <!-- MapLibre -->
+    <script src="https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.css" rel="stylesheet" />
+
+    <!-- Fonts (Inter) - optional but recommended -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+    <div id="map">
+
+        <!-- Main floating control panel -->
+        <div class="control-panel header">
+            <div class="header-content">
+                <h1 class="title">Routing and Services Analysis Tool</h1>
+                
+                <div class="mode-switcher">
+                    <button id="mode-route" class="mode-btn active" type="button">
+                        🗺️ A→B Route
+                    </button>
+                    <button id="mode-tsp" class="mode-btn" type="button">
+                        🔄 TSP Multi
+                    </button>
+                    <button id="mode-facility" class="mode-btn" type="button">
+                        🏥 Nearest Facility
+                    </button>
+                    <button id="mode-crime" class="mode-btn" type="button">
+                        🚚 Service Area
+                    </button>
+
+                </div>
+            </div>
+
+            <p class="instruction" id="mode-instruction">
+                Click: <span class="highlight start">Start</span> →
+                <span class="highlight end">End</span>
+            </p>
+        </div>
+
+        <!-- Time range slider (shown in Service Area mode) -->
+        <div id="time-slider" class="control-panel slider-panel hidden">
+            <label class="slider-label">
+                Service Time: <span id="time-value">5</span> min
+            </label>
+            <input 
+                type="range" 
+                id="time-input" 
+                min="1" 
+                max="15" 
+                value="5" 
+                step="1"
+                class="range-slider"
+            />
+        </div>
+
+        <!-- Result / info panel -->
+        <div id="info-box" class="control-panel info-panel hidden">
+            <p id="route-info" class="info-text">Click to start</p>
+        </div>
+    </div>
+
+    <script src="js/routing.js" defer></script>
+</body>
+</html>

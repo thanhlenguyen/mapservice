@@ -2,7 +2,7 @@
 
 services:
   postgis:
-    image: pgrouting/pgrouting:16-3.5-3.8               # PostGIS with pgRouting       
+    image: pgrouting/pgrouting:16-3.5-4.0               # PostGIS with pgRouting       
     container_name: postgis_db
     restart: unless-stopped
     env_file:
@@ -22,9 +22,56 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.1
+    container_name: elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node                  # Required for single node
+      - xpack.security.enabled=false                # Disable security for dev (no username/password)
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g                  # Adjust heap size (1GB each — change based on your RAM)
+      - "logger.org.elasticsearch: WARN"            # Reduce log noise
+      - http.cors.enabled=true
+      - http.cors.allow-origin="*"
+      - http.cors.allow-methods=OPTIONS,HEAD,GET,POST,PUT,DELETE
+      - http.cors.allow-headers=X-Requested-With,Content-Type,Content-Length,Authorization
+      - http.cors.allow-credentials=true   # optional but useful sometimes
+    ports:
+      - "9200:9200"                                 # HTTP API
+      # - "9300:9300"                                 # Transport (optional, can remove if not needed)
+    volumes:
+      - esdata:/usr/share/elasticsearch/data        # Persist ES data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f http://localhost:9200/_cat/health?h=status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    ulimits:
+      memlock: -1
+      nofile: 65536
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.3.1
+    container_name: kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_PUBLICBASEURL=http://localhost:5601  # optional, helps with some proxy issues
+    volumes:
+      - kibana-data:/usr/share/kibana/data
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f http://localhost:5601/api/status | grep -q 'green' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   martin:
-    image: ghcr.io/maplibre/martin:latest   # official image
+    image: ghcr.io/maplibre/martin:1.3.1   # official image
     container_name: martin_server
     restart: unless-stopped
     env_file:
@@ -32,7 +79,10 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./martin-config.yml:/config.yml:ro
+      - ./config/martin-config.yml:/config.yml:ro # Martin config file (Martin reads martin-config.yml as config.yml)
+      - ./data/mbtiles:/mbtiles:ro # MBTiles files (for Martin to serve when we use Martin to render Mbtiles)
+      - ./data/pmtiles:/pmtiles:ro # PMTiles files (for Martin to serve when we use Martin to render PMTiles)
+      - ./styles/martin:/styles:ro  # Mapbox style JSON files (for Martin to serve when we use Martin to render Mbtiles)
     depends_on:
       postgis:
         condition: service_healthy
@@ -45,8 +95,11 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./tileserver:/tileserver:ro       # config.json + styles/
-      - ./data/mbtiles:/data/mbtiles:ro  # mbtiles files
+      - ./config/config.json:/tileserver/config.json:ro       # config.json 
+      - ./styles/tileserver:/tileserver/styles:ro # styles for Tileserver-GL       
+      - ./data/fonts:/tileserver/fonts:ro      # Raw .ttf/.otf files for Martin to generate glyphs
+      - ./data/sprites:/tileserver/sprites:ro  # Individual SVG/PNG files for Martin to generate sprites     
+      - ./data/mbtiles:/data/mbtiles:ro  # mbtiles files 
     command: --config /tileserver/config.json --verbose
 
   routing-api:
@@ -67,7 +120,7 @@ services:
         condition: service_healthy
         
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: dpage/pgadmin4:9.12.0
     container_name: pgadmin4
     restart: always
     env_file: 
@@ -88,10 +141,17 @@ services:
       - "3001:80"
     volumes:
       - ./frontend:/usr/share/nginx/html
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./data/pmtiles:/usr/share/nginx/html/pmtiles:ro # serve PMTiles files when using PMTiles directly in frontend (serverless method)
+      - ./data/sprites:/usr/share/nginx/html/sprites:ro   # serve sprites
+      - ./data/fonts:/usr/share/nginx/html/fonts:ro       # serve fonts  
+      - ./styles:/usr/share/nginx/html/styles:ro    # serve styles
+      - ./config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - martin
       - tileserver-gl    
+      - routing-api
 
 volumes:
   vsol: # name of the volume in docker
+  esdata:        # New volume for Elasticsearch data persistence
+  kibana-data:   # New volume for Kibana saved objects/dashboards

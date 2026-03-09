@@ -1,6 +1,6 @@
 {
   "version": 8,
-  "name": "3D Map Style",
+  "name": "Building Footprint Map Style",
   "metadata": {"maputnik:renderer": "mlgljs"},
   "center": [46.6753, 24.7136],
   "zoom": 10,
@@ -11,18 +11,47 @@
       "tileSize": 256,
       "attribution": "© CARTO"
     },
-      "administrative": {
+    "administrative": {
       "type": "vector",
-      "url": "mbtiles://Administrative"
+      "tiles": ["http://localhost:3000/administrative/{z}/{x}/{y}"],
+      "minzoom": 4,
+      "maxzoom": 12
     },
     "city_district_zone": {
       "type": "vector",
-      "url": "mbtiles://City_District_Zone"
+      "tiles": ["http://localhost:3000/city_district_zone/{z}/{x}/{y}"],
+      "minzoom": 9,
+      "maxzoom": 13
     },
-    "address_layer": {"type": "vector", "url": "mbtiles://address_layer"},
+    "address_layer": {
+      "type": "vector",
+      "tiles": ["http://localhost:3000/address_layer/{z}/{x}/{y}"],
+      "minzoom": 14,
+      "maxzoom": 15
+    },
     "street_centerline": {
       "type": "vector",
-      "url": "mbtiles://street_centerline"
+      "tiles": ["http://localhost:3000/street_centerline/{z}/{x}/{y}"],
+      "minzoom": 5,
+      "maxzoom": 15
+    },
+    "building_footprints": {
+      "type": "vector",
+      "tiles": ["http://localhost:3000/building_footprint/{z}/{x}/{y}"],
+      "minzoom": 14,
+      "maxzoom": 16
+    },
+    "spl_units": {
+      "type": "vector",
+      "tiles": ["http://localhost:3000/spl_units/{z}/{x}/{y}"],
+      "minzoom": 14,
+      "maxzoom": 18
+    },
+    "spl_vertical": {
+      "type": "vector",
+      "tiles": ["http://localhost:3000/spl_vertical/{z}/{x}/{y}"],
+      "minzoom": 14,
+      "maxzoom": 18
     },
     "pois": {
       "type": "vector",
@@ -31,8 +60,8 @@
       "maxzoom": 22
     }
   },
-  "sprite": "https://openmaptiles.github.io/osm-bright-gl-style/sprite",
-  "glyphs": "http://localhost:8080/fonts/{fontstack}/{range}.pbf",
+  "sprite": "sprite",
+  "glyphs": "fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
       "id": "osm-base",
@@ -177,7 +206,7 @@
       "source": "city_district_zone",
       "source-layer": "CityCenter",
       "minzoom": 11,
-      "layout": {"icon-image": "border-dot-13"},
+      "layout": {"icon-image": "circle_11"},
       "paint": {"icon-opacity": 1, "icon-color": "#000000"}
     },
     {
@@ -289,7 +318,7 @@
       "filter": ["any", ["==", "Subtype", 1], ["==", "Subtype", 2]],
       "layout": {
         "text-field": ["get", "EnglishName"],
-        "text-font": ["Arial Unicode MS Regular"],
+        "text-font": ["Open Sans Regular"],
         "text-size": {"stops": [[7, 12], [18, 16]]},
         "symbol-placement": "line",
         "text-max-angle": 30,
@@ -315,7 +344,7 @@
       "filter": ["none", ["==", "Subtype", 1], ["==", "Subtype", 2]],
       "layout": {
         "text-field": ["get", "EnglishName"],
-        "text-font": ["Arial Unicode MS Regular"],
+        "text-font": ["Open Sans Regular"],
         "text-size": {"stops": [[7, 9], [18, 12]]},
         "symbol-placement": "line",
         "text-max-angle": 30,
@@ -338,7 +367,7 @@
       "source": "address_layer",
       "source-layer": "Short_Address",
       "minzoom": 14,
-      "layout": {"visibility": "visible"},
+      "layout": {"visibility": "none"},
       "paint": {
         "fill-extrusion-height": [
           "case",
@@ -355,6 +384,30 @@
         ],
         "fill-extrusion-color": "#f8f9e6",
         "fill-extrusion-opacity": 0.75
+      }
+    },
+    {
+      "id": "Riyadh",
+      "type": "fill-extrusion",
+      "source": "building_footprints",
+      "source-layer": "Riyadh",
+      "minzoom": 14,
+      "layout": {"visibility": "visible"},
+      "paint": {
+          "fill-extrusion-color": "#e8dcc5",
+          "fill-extrusion-height": ["get", "Height"]
+      }
+    },
+    {
+      "id": "Jeddah_Qassim",
+      "type": "fill-extrusion",
+      "source": "building_footprints",
+      "source-layer": "Jeddah_Qassim",
+      "minzoom": 14,
+      "layout": {"visibility": "visible"},
+      "paint": {
+          "fill-extrusion-height": ["get", "rel_height"],
+          "fill-extrusion-color": "#e8dcc5"
       }
     },
     {
@@ -376,6 +429,75 @@
         "text-halo-color": "#f3f2f2",
         "text-halo-width": 1.5
       }
+    },
+    {
+    "id": "SPL.HQ",
+    "type": "fill-extrusion",
+    "source": "spl_units",
+    "source-layer": "Unit",
+    "minzoom": 14,
+    "layout": {"visibility": "visible"},
+    "paint": {
+        "fill-extrusion-height": [
+            "+",
+            ["get", "Base"],
+            ["get", "HEIGHT"]
+        ],
+        "fill-extrusion-base": ["get", "Base"],
+        "fill-extrusion-opacity": 0.8,
+        "fill-extrusion-color": [
+            "match",
+            ["get", "LEVEL_ID"],
+            ["SPL.HQ.L0"],
+            "#fff1a8",
+            ["SPL.HQ.L1"],
+            "hsl(50, 95%, 83%)",
+            ["SPL.HQ.L2"],
+            "hsl(50, 90%, 83%)",
+            ["SPL.HQ.L3"],
+            "hsl(50, 85%, 83%)",
+            ["SPL.HQ.L4"],
+            "hsl(50, 80%, 83%)",
+            "hsl(50, 75%, 83%)"
+            ]
+        }
+    },
+    {
+    "id": "SPL Vertical",
+    "type": "fill-extrusion",
+    "source": "spl_vertical",
+    "source-layer": "Vertical",
+    "minzoom": 14,
+    "layout": {"visibility": "visible"},
+    "paint": {
+        "fill-extrusion-height": [
+            "*",
+            ["/",
+              ["get", "BuildingHeight"],
+              ["get", "NoofFloors"]
+            ],
+            ["+", ["get", "FloorNumber"], 1]
+          ],
+        "fill-extrusion-base": [
+            "*",
+            ["/",
+              ["get", "BuildingHeight"],
+              ["get", "NoofFloors"]
+            ],
+            ["get", "FloorNumber"]
+          ],
+        "fill-extrusion-opacity": 0.0,
+        "fill-extrusion-color": [
+            "match",
+            ["to-number", ["get", "FloorNumber"]],
+              0, "#fff1a8",
+              1, "hsl(50, 75%, 83%)",
+              2, "hsl(50, 90%, 83%)",
+              3, "hsl(50, 65%, 83%)",
+              4, "hsl(50, 80%, 83%)",
+              "hsl(50, 55%, 83%)"
+            ]
+        }
     },
     {
       "id": "poi-label",

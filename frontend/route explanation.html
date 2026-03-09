@@ -1,0 +1,501 @@
+        .speed-badge {
+            background: #dbeafe;
+            color: #1e40af;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route Analysis & Explanation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1rem;
+        }
+        
+        .input-section {
+            padding: 2rem;
+            background: #f8fafc;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
+        .input-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .input-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .input-group label {
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+        
+        .input-group input {
+            padding: 0.75rem;
+            border: 2px solid #cbd5e1;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            transition: all 0.2s;
+        }
+        
+        .input-group input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(59, 130, 246, 0.4);
+        }
+        
+        .btn:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .content {
+            padding: 2rem;
+        }
+        
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .card {
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .card h3 {
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .card .value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: #1e293b;
+        }
+        
+        .card .unit {
+            font-size: 1rem;
+            color: #64748b;
+            font-weight: 500;
+        }
+        
+        .section {
+            margin-bottom: 2rem;
+        }
+        
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 3px solid #3b82f6;
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        
+        thead {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            color: white;
+        }
+        
+        th {
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        
+        tbody tr {
+            border-bottom: 1px solid #e2e8f0;
+            transition: background 0.2s;
+        }
+        
+        tbody tr:hover {
+            background: #f8fafc;
+        }
+        
+        tbody tr:nth-child(even) {
+            background: #f9fafb;
+        }
+        
+        tbody tr:nth-child(even):hover {
+            background: #f1f5f9;
+        }
+        
+        td {
+            padding: 1rem;
+            color: #334155;
+        }
+        
+        .step-badge {
+            background: #3b82f6;
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-weight: 600;
+            display: inline-block;
+        }
+        
+        .road-type {
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            background: #e0e7ff;
+            color: #3730a3;
+        }
+        
+        .direction {
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .dir-forward { background: #dcfce7; color: #166534; }
+        .dir-reverse { background: #fef2f2; color: #991b1b; }
+        
+        .notes {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 2rem;
+        }
+        
+        .notes ul {
+            margin-left: 1.5rem;
+            margin-top: 0.5rem;
+        }
+        
+        .notes li {
+            margin-bottom: 0.5rem;
+            color: #92400e;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #64748b;
+        }
+        
+        .error {
+            background: #fee2e2;
+            border: 2px solid #ef4444;
+            color: #991b1b;
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            margin-top: 1rem;
+        }
+        
+        .snap-info {
+            background: #f0fdfa;
+            border: 2px solid #14b8a6;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+        
+        .snap-info strong {
+            color: #115e59;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗺️ Route Analysis & Explanation Tool</h1>
+            <p>Understand why your route was chosen by the algorithm</p>
+        </div>
+        
+        <div class="input-section">
+            <div class="input-grid">
+                <div class="input-group">
+                    <label>Start Longitude</label>
+                    <input type="number" id="start_lon" step="0.0001" value="46.7167" placeholder="e.g., 46.7167">
+                </div>
+                <div class="input-group">
+                    <label>Start Latitude</label>
+                    <input type="number" id="start_lat" step="0.0001" value="24.6833" placeholder="e.g., 24.6833">
+                </div>
+                <div class="input-group">
+                    <label>End Longitude</label>
+                    <input type="number" id="end_lon" step="0.0001" value="46.7300" placeholder="e.g., 46.7300">
+                </div>
+                <div class="input-group">
+                    <label>End Latitude</label>
+                    <input type="number" id="end_lat" step="0.0001" value="24.7000" placeholder="e.g., 24.7000">
+                </div>
+            </div>
+            <button class="btn" id="analyzeBtn" onclick="analyzeRoute()">
+                🔍 Analyze Route
+            </button>
+        </div>
+        
+        <div class="content" id="results" style="display: none;">
+            <div class="summary-cards" id="summaryCards"></div>
+            
+            <div class="section">
+                <h2 class="section-title">📊 Step-by-Step Route Explanation</h2>
+                <div class="table-container">
+                    <table id="routeTable">
+                        <thead>
+                            <tr>
+                                <th>Step</th>
+                                <th>Street Name</th>
+                                <th>Speed (km/h)</th>
+                                <th>Direction</th>
+                                <th>One-Way?</th>
+                                <th>Distance (km)</th>
+                                <th>Time (min)</th>
+                                <th>Cumulative (km)</th>
+                                <th>Cumulative (min)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="routeTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2 class="section-title">🛣️ Alternative Routes from Start</h2>
+                <div class="table-container">
+                    <table id="altTable">
+                        <thead>
+                            <tr>
+                                <th>Edge ID</th>
+                                <th>Street Name</th>
+                                <th>Speed (km/h)</th>
+                                <th>One-Way?</th>
+                                <th>Direction</th>
+                                <th>Travel Time (min)</th>
+                                <th>Length (m)</th>
+                                <th>Leads to Vertex</th>
+                            </tr>
+                        </thead>
+                        <tbody id="altTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="notes">
+                <h3 style="margin-bottom: 0.5rem; color: #92400e;"><strong>⚠️ Routing Algorithm Notes:</strong></h3>
+                <ul id="notesList"></ul>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        async function analyzeRoute() {
+            const btn = document.getElementById('analyzeBtn');
+            const results = document.getElementById('results');
+            
+            const start_lon = document.getElementById('start_lon').value;
+            const start_lat = document.getElementById('start_lat').value;
+            const end_lon = document.getElementById('end_lon').value;
+            const end_lat = document.getElementById('end_lat').value;
+            
+            if (!start_lon || !start_lat || !end_lon || !end_lat) {
+                alert('Please fill in all coordinates');
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = '⏳ Analyzing...';
+            results.style.display = 'none';
+            
+            try {
+                const url = `http://localhost:5000/route_explained?start_lon=${start_lon}&start_lat=${start_lat}&end_lon=${end_lon}&end_lat=${end_lat}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                displayResults(data);
+                results.style.display = 'block';
+                
+            } catch (error) {
+                alert('Error: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔍 Analyze Route';
+            }
+        }
+        
+        function displayResults(data) {
+            // Summary cards
+            const summaryCards = document.getElementById('summaryCards');
+            summaryCards.innerHTML = `
+                <div class="card">
+                    <h3>Total Distance</h3>
+                    <div class="value">${data.summary.total_distance_km} <span class="unit">km</span></div>
+                </div>
+                <div class="card">
+                    <h3>Total Time</h3>
+                    <div class="value">${data.summary.total_time_minutes} <span class="unit">min</span></div>
+                </div>
+                <div class="card">
+                    <h3>Segments</h3>
+                    <div class="value">${data.summary.segment_count} <span class="unit">edges</span></div>
+                </div>
+                <div class="card">
+                    <h3>Algorithm</h3>
+                    <div class="value" style="font-size: 1.25rem;">${data.summary.algorithm}</div>
+                </div>
+            `;
+            
+            // Snap info
+            const snapInfo = document.createElement('div');
+            snapInfo.className = 'snap-info';
+            snapInfo.innerHTML = `
+                <strong>📍 Point Snapping:</strong><br>
+                Start: Snapped ${data.summary.start_point.snap_distance_m}m to vertex ${data.summary.start_point.snapped_to_vertex}<br>
+                End: Snapped ${data.summary.end_point.snap_distance_m}m to vertex ${data.summary.end_point.snapped_to_vertex}
+            `;
+            summaryCards.after(snapInfo);
+            
+            // Route table
+            const tbody = document.getElementById('routeTableBody');
+            tbody.innerHTML = '';
+            
+            data.detailed_explanation.forEach(step => {
+                const row = tbody.insertRow();
+                const onewayIcon = step.is_oneway ? '✓' : '✗';
+                const onewayColor = step.is_oneway ? '#059669' : '#6b7280';
+                
+                row.innerHTML = `
+                    <td><span class="step-badge">${step.step}</span></td>
+                    <td><strong>${step.street_name}</strong></td>
+                    <td><span class="speed-badge">${step.speed_kmh || 'N/A'}</span></td>
+                    <td><span class="direction dir-${step.direction}">${step.direction}</span></td>
+                    <td style="color: ${onewayColor}; font-weight: 600;">${onewayIcon}</td>
+                    <td>${step.distance_km}</td>
+                    <td>${step.time_minutes}</td>
+                    <td><strong>${step.cumulative_distance_km}</strong></td>
+                    <td><strong>${step.cumulative_time_minutes}</strong></td>
+                `;
+            });
+            
+            // Alternative routes table
+            const altBody = document.getElementById('altTableBody');
+            altBody.innerHTML = '';
+            
+            if (data.alternative_paths_from_start && data.alternative_paths_from_start.length > 0) {
+                data.alternative_paths_from_start.forEach(alt => {
+                    const row = altBody.insertRow();
+                    const onewayIcon = alt.is_oneway ? '✓' : '✗';
+                    const onewayColor = alt.is_oneway ? '#059669' : '#6b7280';
+                    
+                    row.innerHTML = `
+                        <td>${alt.id}</td>
+                        <td>${alt.name || 'Unnamed'}</td>
+                        <td><span class="speed-badge">${alt.speed_km || 'N/A'}</span></td>
+                        <td style="color: ${onewayColor}; font-weight: 600;">${onewayIcon}</td>
+                        <td><span class="direction dir-${alt.direction_from_start}">${alt.direction_from_start}</span></td>
+                        <td>${alt.travel_minutes_from_start}</td>
+                        <td>${alt.length_m}</td>
+                        <td>→ Vertex ${alt.leads_to_vertex}</td>
+                    `;
+                });
+            }
+            
+            // Notes
+            const notesList = document.getElementById('notesList');
+            notesList.innerHTML = '';
+            data.routing_notes.forEach(note => {
+                const li = document.createElement('li');
+                li.textContent = note;
+                notesList.appendChild(li);
+            });
+        }
+    </script>
+</body>
+</html>

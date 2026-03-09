@@ -3,6 +3,11 @@ data/
 tileserver/fonts/
 tileserver/sprites/
 env/
+k8s-manifests/
+k8s/
+k8s-edited/
+k8s-styles/
+archive/
 *.zip
 *.tar.gz
 *.rar
@@ -10,3 +15,4 @@ env/
 *.mbtiles
 *.geojson
 *.pbf
+check_code
