@@ -14,15 +14,17 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- Custom styles -->
+    <!-- Merged styles -->
     <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
 
     <div id="map">
 
-        <!-- Main floating control panel with all controls -->
+        <!-- ── APP 1: Main floating control panel ── -->
         <div class="control-panel header">
+            <!-- Compact label shown when panel is minimised -->
+            <span class="panel-minimised-label">🗺️ Routing &amp; Services</span> 
             <div class="header-content">
                 <h1 class="title">Routing and Services Analysis Tool</h1>
                 
@@ -42,7 +44,7 @@
                 </div>
 
                 <!-- Route optimization selector (shown only in route mode) -->
-                <div id="route-options" class="hidden mode-specific-controls">
+                <div id="route-options" class="mode-specific-controls">
                     <label class="route-option-label">Route Optimization:</label>
                     <div class="route-option-buttons">
                         <button id="opt-fastest" class="route-opt-btn active" type="button">
@@ -70,10 +72,9 @@
                     </select>
                 </div>
 
-                <!-- Facility sliders container (both sliders side by side) -->
+                <!-- Facility sliders container -->
                 <div id="facility-sliders-container" class="hidden mode-specific-controls">
                     <div class="sliders-row">
-                        <!-- Facility count slider -->
                         <div class="slider-column">
                             <label class="slider-label">
                                 Find: <span id="facility-count-value">5</span> facilities
@@ -88,8 +89,6 @@
                                 class="range-slider"
                             />
                         </div>
-
-                        <!-- Search distance slider -->
                         <div class="slider-column">
                             <label class="slider-label">
                                 Radius: <span id="distance-value">10</span> km
@@ -107,22 +106,22 @@
                     </div>
                 </div>
  
-            <!-- Time range slider (shown in Service Area mode) -->
-            <div id="time-slider" class="hidden mode-specific-controls">
-                <label class="slider-label">
-                    Service Time: <span id="time-value">5</span> min
-                </label>
-                <input 
-                    type="range" 
-                    id="time-input" 
-                    min="1" 
-                    max="15" 
-                    value="5" 
-                    step="1"
-                    class="range-slider"
-                />
+                <!-- Time range slider (shown in Service Area mode) -->
+                <div id="time-slider" class="hidden mode-specific-controls">
+                    <label class="slider-label">
+                        Service Time: <span id="time-value">5</span> min
+                    </label>
+                    <input 
+                        type="range" 
+                        id="time-input" 
+                        min="1" 
+                        max="15" 
+                        value="5" 
+                        step="1"
+                        class="range-slider"
+                    />
+                </div>
             </div>
-        </div>
 
             <p class="instruction" id="mode-instruction">
                 Click: <span class="highlight start">Start</span> →
@@ -145,8 +144,28 @@
                 <p class="info-hint">Click on a feature to see details</p>
             </div>
         </div>
-    </div>
 
-    <script src="js/routing.js" defer></script>
+        <!-- ── APP 2: Search panel (top-left) ── -->
+        <div id="search-control" class="maplibregl-ctrl maplibregl-ctrl-group search-panel">
+            <!-- Dataset selector -->
+            <div class="dataset-selector">
+                <label><input type="radio" name="dataset" value="units" checked> Units</label>
+                <label><input type="radio" name="dataset" value="floors"> Floors / Buildings</label>
+            </div>
+
+            <!-- Search bar -->
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="Search by ID, Name, Address..." />
+                <button onclick="searchUnits()">Search</button>
+            </div>
+
+            <!-- Results list -->
+            <div id="results" class="results-list"></div>
+        </div>
+
+    </div>
+    
+    <!-- Custom scripts -->
+    <script src="js/scripts.js" defer></script>
 </body>
 </html>

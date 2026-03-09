@@ -22,9 +22,56 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.1
+    container_name: elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node                  # Required for single node
+      - xpack.security.enabled=false                # Disable security for dev (no username/password)
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g                  # Adjust heap size (1GB each — change based on your RAM)
+      - "logger.org.elasticsearch: WARN"            # Reduce log noise
+      - http.cors.enabled=true
+      - http.cors.allow-origin="*"
+      - http.cors.allow-methods=OPTIONS,HEAD,GET,POST,PUT,DELETE
+      - http.cors.allow-headers=X-Requested-With,Content-Type,Content-Length,Authorization
+      - http.cors.allow-credentials=true   # optional but useful sometimes
+    ports:
+      - "9200:9200"                                 # HTTP API
+      # - "9300:9300"                                 # Transport (optional, can remove if not needed)
+    volumes:
+      - esdata:/usr/share/elasticsearch/data        # Persist ES data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f http://localhost:9200/_cat/health?h=status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    ulimits:
+      memlock: -1
+      nofile: 65536
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.3.1
+    container_name: kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_PUBLICBASEURL=http://localhost:5601  # optional, helps with some proxy issues
+    volumes:
+      - kibana-data:/usr/share/kibana/data
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f http://localhost:5601/api/status | grep -q 'green' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   martin:
-    image: ghcr.io/maplibre/martin:1.2.0   # official image
+    image: ghcr.io/maplibre/martin:1.3.1   # official image
     container_name: martin_server
     restart: unless-stopped
     env_file:
@@ -73,7 +120,7 @@ services:
         condition: service_healthy
         
   pgadmin:
-    image: dpage/pgadmin4:9.11.0
+    image: dpage/pgadmin4:9.12.0
     container_name: pgadmin4
     restart: always
     env_file: 
@@ -106,3 +153,5 @@ services:
 
 volumes:
   vsol: # name of the volume in docker
+  esdata:        # New volume for Elasticsearch data persistence
+  kibana-data:   # New volume for Kibana saved objects/dashboards

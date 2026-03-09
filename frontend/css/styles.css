@@ -21,6 +21,25 @@ body {
 }
 
 /* ==========================================================================
+   MAP
+   ========================================================================== */
+#map {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 100vh;
+    overflow: visible;
+}
+
+/* Cursor styles for info pointer mode */
+#map.info-pointer-active {
+    cursor: default;
+}
+
+/* ==========================================================================
    FLOATING CONTROL PANELS
    ========================================================================== */
 .control-panel {
@@ -37,7 +56,7 @@ body {
     max-width: 95vw;
 }
 
-/* Header panel (top) */
+/* Header panel (top-center) */
 .control-panel.header {
     top: 1rem;
     z-index: 20;
@@ -132,6 +151,8 @@ body {
     cursor: pointer;
     transition: all 0.2s ease;
     white-space: nowrap;
+    width: auto;
+    min-height: unset;
 }
 
 .route-opt-btn:hover {
@@ -205,6 +226,8 @@ body {
     color: #374151;
     background: white;
     transition: all 0.2s ease;
+    width: auto;
+    min-height: unset;
 }
 
 #facility-type-select:hover {
@@ -386,6 +409,8 @@ body {
     justify-content: center;
     border-radius: 0.25rem;
     transition: all 0.2s ease;
+    min-height: unset;
+    min-width: unset;
 }
 
 .close-btn:hover {
@@ -450,38 +475,55 @@ body {
 }
 
 /* ==========================================================================
-   INFO POINTER TOGGLE BUTTON
+   INFO POINTER + PANEL TOGGLE BUTTONS (shared ctrl group in top-right)
    ========================================================================== */
-.info-pointer-toggle {
-    position: absolute;
-    top: 90px;
-    right: 0.5px;
-    z-index: 10;
+
+/* Both buttons live inside one maplibregl-ctrl-group — no extra positioning needed */
+#custom-map-controls {
+    display: flex;
+    flex-direction: column;
 }
 
-.info-pointer-btn {
+.info-pointer-btn,
+.panel-toggle-btn {
     background: white;
-    border: 2px solid rgba(0, 0, 0, 0.1);
-    border-radius: 4px;
+    border: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
     width: 29px;
     height: 29px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    font-size: 16px;
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
-    transition: all 0.2s ease;
+    font-size: 14px;
+    font-weight: 700;
+    color: #374151;
+    transition: background 0.2s ease, color 0.2s ease;
+    min-height: unset;
+    min-width: unset;
+    padding: 0;
+    line-height: 1;
 }
 
-.info-pointer-btn:hover {
+.info-pointer-btn {
+    font-size: 16px; /* emoji needs slightly larger */
+    border-radius: 4px 4px 0 0;
+}
+
+.panel-toggle-btn {
+    border-bottom: none;
+    border-radius: 0 0 4px 4px;
+}
+
+.info-pointer-btn:hover,
+.panel-toggle-btn:hover {
     background: #f0f9ff;
-    border-color: #3b82f6;
+    color: #3b82f6;
 }
 
-.info-pointer-btn.active {
+.info-pointer-btn.active,
+.panel-toggle-btn.active {
     background: #3b82f6;
-    border-color: #3b82f6;
     color: white;
 }
 
@@ -514,22 +556,6 @@ body {
 }
 
 /* ==========================================================================
-   MAP
-   ========================================================================== */
-#map {
-    position: relative;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    overflow: visible;
-}
-
-/* Cursor styles for info pointer mode */
-#map.info-pointer-active {
-    cursor: default;
-}
-
-/* ==========================================================================
    UTILITIES
    ========================================================================== */
 .hidden {
@@ -552,6 +578,278 @@ body {
 #info-box,
 #info-box * {
     pointer-events: auto;
+}
+
+/* ==========================================================================
+   CONTROL PANEL TOGGLE – minimised state
+   ========================================================================== */
+
+/* When minimised, collapse everything except a slim title bar */
+.control-panel.header.panel-minimised {
+    padding: 0.5rem 1rem;
+    min-width: unset;
+    width: auto;
+    cursor: pointer;
+    display: flex !important;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.25s ease;
+}
+
+/* Hide everything inside when minimised */
+.control-panel.header.panel-minimised .header-content,
+.control-panel.header.panel-minimised .instruction {
+    display: none !important;
+}
+
+/* Show a compact label via a child span injected by JS */
+.panel-minimised-label {
+    display: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #374151;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.control-panel.header.panel-minimised .panel-minimised-label {
+    display: inline;
+}
+
+/* Panel toggle button in top-right controls */
+.panel-toggle-btn {
+    background: white;
+    border: 2px solid rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    width: 29px;
+    height: 29px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    color: #374151;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+    min-height: unset;
+    min-width: unset;
+    padding: 0;
+    line-height: 1;
+}
+
+.panel-toggle-btn:hover {
+    background: #f0f9ff;
+    border-color: #3b82f6;
+    color: #3b82f6;
+}
+
+.panel-toggle-btn.active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: white;
+}
+
+/* ==========================================================================
+   SEARCH PANEL (top-left, fixed position)
+   ========================================================================== */
+.search-panel {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    /* Override .control-panel centering */
+    transform: none !important;
+    left: 10px !important;
+    z-index: 15;
+    width: 340px;
+    background: rgba(255, 255, 255, 0.96);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    padding: 16px;
+    font-family: 'Inter', sans-serif;
+    /* Not centered – override base .control-panel */
+    min-width: unset;
+    max-width: unset;
+    border: 1px solid #e0f2fe;
+}
+
+/* Dataset selector styling */
+.dataset-selector {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.dataset-selector label {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #374151;
+    transition: color 0.2s;
+}
+
+.dataset-selector label:hover {
+    color: #2563eb;
+}
+
+.dataset-selector input[type="radio"] {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+}
+
+/* Search bar */
+.search-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+#searchInput {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 15px;
+    font-family: 'Inter', sans-serif;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
+}
+
+#searchInput:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+#searchInput::placeholder {
+    color: #9ca3af;
+}
+
+/* Search button – scoped to search panel only */
+.search-panel button {
+    width: 100%;
+    padding: 10px 20px;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 15px;
+    font-family: 'Inter', sans-serif;
+    transition: background 0.2s, transform 0.1s;
+    box-sizing: border-box;
+    min-height: 42px;
+}
+
+.search-panel button:hover {
+    background: #1d4ed8;
+}
+
+.search-panel button:active {
+    transform: scale(0.98);
+}
+
+/* Results list */
+.results-list {
+    max-height: 380px;
+    overflow-y: auto;
+    margin-top: 8px;
+    border-top: 1px solid #e5e7eb;
+    padding-top: 8px;
+}
+
+.results-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.results-list::-webkit-scrollbar-track {
+    background: #f3f4f6;
+    border-radius: 3px;
+}
+
+.results-list::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 3px;
+}
+
+.results-list::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+}
+
+.result-item {
+    padding: 12px 10px;
+    border-bottom: 1px solid #f3f4f6;
+    cursor: pointer;
+    transition: background 0.2s;
+    border-radius: 4px;
+    margin-bottom: 2px;
+}
+
+.result-item:hover {
+    background: #eff6ff;
+}
+
+.result-item.active {
+    background: #dbeafe;
+    border-left: 3px solid #2563eb;
+    padding-left: 9px;
+}
+
+.result-item strong {
+    color: #1f2937;
+    font-size: 15px;
+}
+
+.result-item small {
+    color: #6b7280;
+    font-size: 12px;
+}
+
+.loading, .no-results, .error {
+    text-align: center;
+    padding: 24px 16px;
+    color: #6b7280;
+    font-size: 14px;
+}
+
+.loading::before   { content: "⏳ "; }
+.no-results::before { content: "🔍 "; }
+.error { color: #dc2626; }
+.error::before { content: "⚠️ "; }
+
+/* Popup styling */
+.unit-popup {
+    max-width: 320px !important;
+    font-family: 'Inter', sans-serif;
+}
+
+.maplibregl-popup-content {
+    padding: 12px 16px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.maplibregl-popup-close-button {
+    font-size: 20px;
+    padding: 4px 8px;
+    color: #6b7280;
+}
+
+.maplibregl-popup-close-button:hover {
+    background: #f3f4f6;
+    color: #1f2937;
 }
 
 /* ==========================================================================
@@ -617,6 +915,21 @@ body {
         max-width: calc(100vw - 2rem);
         right: 1rem;
     }
+
+    .search-panel {
+        width: calc(100vw - 20px);
+        left: 10px;
+        right: 10px;
+    }
+
+    .dataset-selector {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .results-list {
+        max-height: 240px;
+    }    
 }
 
 @media (max-width: 400px) {

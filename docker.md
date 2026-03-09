@@ -1,4 +1,4 @@
-# Self-Hosted Map System using PostGIS, Martin, and TileServer-GL
+, for# Self-Hosted Map System using PostGIS, Martin, and TileServer-GL
 
 This guide outlines the steps to replace Mapbox in a localhost environment using a stack of open-source tools for serving static and dynamic vector tiles, and integrating a custom geocoding/POI search and an AI-powered API layer.
 
@@ -568,7 +568,7 @@ docker compose up -d
 ```bash
 docker compose logs container_name
 ```
-- martin_server is restarting because it cannot connect to PostGIS (the connection string is wrong): please check in ```martin-config.yml``` (because of martin connects with postgis inside docker so ```POSTGRES_HOST``` is not ```localhost```)
+- martin_server is restarting because it cannot connect to PostGIS (the connection string is wrong or it is not created yet `CREATE EXTENTION IF NOT EXISTS Postgis`): please check in ```martin-config.yml``` (because of martin connects with postgis inside docker so ```POSTGRES_HOST``` is not ```localhost```), and also need to install Pos
 - ```volumes: - ./tileserver:/data:ro```: defines a data storage area that exists outside the container’s temporary filesystem. (```./tileserver```: Folder on your host computer (relative to the YAML file), ```/data```: Folder inside the container)
 
 ## Phase 2: Static Maps (Basemap) with TileServer-GL
@@ -2304,5 +2304,310 @@ function clearAll() {
     // Reset data
     state.currentRouteData = null;
     showInfo("Click to start");
+}
+```
+## Phase 7: Add ElasticSearch
+### Step 1: Add ElasticSearch to docker-compose file:
+```bash
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.1
+    container_name: elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node                  # Required for single node
+      - xpack.security.enabled=false                # Disable security for dev (no username/password)
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g                  # Adjust heap size (1GB each — change based on your RAM)
+      - "logger.org.elasticsearch: WARN"            # Reduce log noise
+      - http.cors.enabled=true
+      - http.cors.allow-origin="*"
+      - http.cors.allow-methods=OPTIONS,HEAD,GET,POST,PUT,DELETE
+      - http.cors.allow-headers=X-Requested-With,Content-Type,Content-Length,Authorization
+      - http.cors.allow-credentials=true   # optional but useful sometimes
+    ports:
+      - "9200:9200"                                 # HTTP API
+      # - "9300:9300"                                 # Transport (optional, can remove if not needed)
+    volumes:
+      - esdata:/usr/share/elasticsearch/data        # Persist ES data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f http://localhost:9200/_cat/health?h=status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    ulimits:
+      memlock: -1
+      nofile: 65536
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.3.1
+    container_name: kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_PUBLICBASEURL=http://localhost:5601  # optional, helps with some proxy issues
+    volumes:
+      - kibana-data:/usr/share/kibana/data
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f http://localhost:5601/api/status | grep -q 'green' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+```
+### Step 2: Importing GeoJSON Data to Elasticsearch
+#### a. Create an Index with Appropriate Mapping
+Before importing, define an index with mappings for your fields. Use `geo_shape` for the `geometry` field to support spatial queries.
+
+You can do this via `curl` from your host on the terminal (assuming ES is exposed on port 9200):
+```bash
+curl -X PUT "http://localhost:9200/building_units" -H 'Content-Type: application/json' -d'
+{
+  "mappings": {
+    "dynamic": "true",              // ← change to "strict" later when stable
+    "properties": {
+      "UNIT_ID": { "type": "keyword" },  // Exact match for IDs
+      "USE_TYPE": { "type": "keyword" },
+      "NAME": { "type": "text" },        // Full-text search
+      "NAME_LONG": { "type": "text" },
+      "LEVEL_ID": { "type": "keyword" },
+      "HEIGHT": { "type": "float" },
+      "LabelNames": { "type": "text" },
+      "UnitAddres": { "type": "keyword" },
+      "Sequance": { "type": "keyword" },
+      "Base": { "type": "float" },
+      "geometry": { "type": "geo_shape" }  // For MultiPolygon spatial data
+    }
+  }
+}'
+```
+Or from Kibana:
+- Open your browser and go to: http://localhost:5601 
+- Log in if asked (first time it might show a welcome screen — just continue).
+- On the left menu, click Dev Tools (it looks like a terminal icon, or sometimes under Management > Dev Tools).You will see two panels:
+  - Left side: where you write commands (like a text editor)
+  - Right side: shows results
+- In the left panel, delete any example text if present, then paste your full command.
+building_units.geojson
+```json
+PUT /building_units_v2
+{
+  "settings": {
+    "analysis": {
+      "normalizer": {
+        "lowercase_normalizer": {
+          "type": "custom",
+          "filter": ["lowercase"]
+          // Optional but very useful for Vietnamese addresses: "asciifolding"  → turns "Lê" → "Le", "Đ" → "D", etc.
+        }
+      }
+    }
+  },
+  "mappings": {
+    "dynamic": "true",              // ← change to "strict" later when stable
+    "properties": {
+      "UNIT_ID": { "type": "keyword", "normalizer": "lowercase_normalizer"},           // ← this is the key, Exact match for IDs
+      "USE_TYPE": { "type": "keyword", "normalizer": "lowercase_normalizer" },
+      "NAME": { "type": "text" },        // Full-text search
+      "NAME_LONG": { "type": "text" },
+      "LEVEL_ID": { "type": "keyword", "normalizer": "lowercase_normalizer" },
+      "HEIGHT": { "type": "float" },
+      "LabelNames": { "type": "text" },
+      "UnitAddres": { "type": "keyword", "normalizer": "lowercase_normalizer" },
+      "Sequance": { "type": "keyword", "normalizer": "lowercase_normalizer" },
+      "Base": { "type": "float" },
+      "geometry": { "type": "geo_shape" }  // For MultiPolygon spatial data
+    }
+  }
+}
+```
+Note: in version 2(v_2), we convert to all lower can in data for searching in future
+
+Replace `building_units` with your preferred index name.
+
+##### Mapping Strategy 
+- Keep dynamic: true (default) → if you accidentally index one of the unused fields later, Elasticsearch will guess its type (not ideal, but safe during development).
+- Later (production): change to dynamic: "strict" → rejects any new/unmapped fields → forces clean data.
+
+If you want to add mapping to an existing index (update/add fields)
+- Use almost the same command, but change the path:
+```json
+PUT /building_units/_mapping
+{
+  "properties": {
+    "new_field": { "type": "keyword" }
+  }
+}
+```
+- Run it the same way (Kibana or curl).
+
+Note: You can only add new fields this way — you cannot change existing field types without reindexing.
+
+##### Make Searches Better (Small Improvements)
+
+You can add these later (after testing):
+```JSON
+"UnitAddres": {
+  "type": "keyword",
+  "fields": {
+    "text": { "type": "text" }      // ← allows full-text if you ever want partial search
+  }
+}
+```
+##### Quick Troubleshooting Tips
+
+- Index already exists → Run `DELETE /building_units` first (in Kibana or curl), then recreate.
+- JSON error → Make sure no missing commas, quotes, or wrong indentation. Kibana highlights mistakes.
+
+#### b. Prepare and Import the Data
+  - Install it on your host if needed (`pip install elasticsearch`)
+```bash
+# Install Python & venv
+sudo apt update
+sudo apt install python3 python3-venv python3-pip -y
+
+# Create a virtual environment
+python3 -m venv env
+
+# Activate it
+source env/bin/activate
+
+# Install packages
+pip install elasticsearch
+```  
+  - Use a Python Script: use the elasticsearch library to bulk import. Save this script as `import_geojson_to_es.py`
+```python
+from elasticsearch import Elasticsearch, helpers
+
+# Connect to ES (update host if not localhost)
+es = Elasticsearch(["http://localhost:9200"])
+
+# Load GeoJSON
+with open("units.geojson", "r") as f:  # Replace with your file path
+    geojson_data = json.load(f)
+
+# Prepare bulk actions (one document per feature)
+actions = []
+for feature in geojson_data["features"]:
+    doc = {
+        "_index": "building_units",  # Your index name
+        "_source": {
+            **feature["properties"],  # Spread properties
+            "geometry": feature["geometry"]  # GeoJSON geometry
+        }
+    }
+    actions.append(doc)
+
+# Bulk index
+helpers.bulk(es, actions)
+print("Import completed!")
+```
+  - Run it: python3 import_geojson_to_es.py.
+  
+#### c. Verify Import: 
+- Use Kibana's "Management > Dev Tools" 
+```t
+# Check if the index exists and get basic stats (including document count)
+GET /building_units
+
+# Get just the document count (clean & fast)
+GET /building_units/_count
+
+# See a sample of the actual documents (proof that data & geometry are there)
+GET /building_units/_search
+{
+  "query": {
+    "match_all": {}
+  },
+  "size": 5                       // show only first 5 documents (default is 10)
+}
+
+# Search for a specific known unit (e.g. "1481")
+GET /building_units/_search
+{
+  "query": {
+    "match": {
+      "UNIT_ID": "SPL.HQ.L0.1481"
+    }
+  }
+}
+```
+- or curl: 
+```Bash 
+curl "http://localhost:9200/building_units/_search?q=*&pretty"  # Search all
+```
+
+## Step 3: Building a UI to Search Units
+### Build a Search Function in Your Frontend (with JS)
+```js
+// ============================================================================
+// SEARCH (Elasticsearch – Building Units / Floors)
+// ============================================================================
+
+async function searchUnits() {
+    const queryText  = document.getElementById('searchInput').value.trim();
+    const resultsDiv = document.getElementById('results');
+
+    if (!queryText) {
+        resultsDiv.innerHTML = '<div class="no-results">Please enter a search term</div>';
+        return;
+    }
+
+    resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
+    clearHighlight();
+
+    const index   = currentDataset === 'units' ? 'building_units' : 'buildings_vertical';
+    const fields  = currentDataset === 'units'
+        ? ['UNIT_ID', 'NAME^2', 'NAME_LONG', 'UnitAddres', 'LabelNames']
+        : ['UnitAddress^3', 'ShortAddress^1.8', 'fkFloorID^1.5', 'FloorUsage'];
+
+    const esQuery = { query: { multi_match: { query: queryText, fields, type: 'best_fields', fuzziness: 'AUTO' } }, size: 20 };
+
+    try {
+        const response = await fetch(`${ES_URL}/${index}/_search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(esQuery)
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json();
+        resultsDiv.innerHTML = '';
+
+        if (data.hits.hits.length === 0) {
+            resultsDiv.innerHTML = '<div class="no-results">No results found.</div>';
+            return;
+        }
+
+        data.hits.hits.forEach(hit => {
+            const doc  = hit._source;
+            const item = document.createElement('div');
+            item.className = 'result-item';
+
+            if (currentDataset === 'units') {
+                item.innerHTML = `
+                    <strong>${doc.UNIT_ID || 'N/A'}</strong><br>
+                    ${doc.LabelNames || 'Unnamed'} (${doc.UnitAddres || 'No address'})<br>
+                    <small>Floor Height: ${doc.Base !== undefined ? doc.Base.toFixed(2) + 'm' : 'N/A'} | Type: ${doc.USE_TYPE || 'N/A'}</small>
+                `;
+            } else {
+                item.innerHTML = `
+                    <strong>${doc.UnitAddress || doc.fkFloorID || '—'}</strong><br>
+                    Floor ${doc.FloorNumber ?? '—'} – ${doc.FloorUsage || '—'}<br>
+                    <small>Address: ${doc.UnitAddress || doc.ShortAddress || 'No address'} | Building: ${doc.BuildingHeight ? doc.BuildingHeight.toFixed(1) + 'm' : '—'}</small>
+                `;
+            }
+
+            item.onclick = () => zoomToFeature(doc, item);
+            resultsDiv.appendChild(item);
+        });
+
+    } catch (err) {
+        console.error('Search error:', err);
+        resultsDiv.innerHTML = `<div class="error">Error: ${err.message}<br><small>Check console for details</small></div>`;
+    }
 }
 ```
