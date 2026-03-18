@@ -332,3 +332,30 @@ kubectl apply -f all-manifests.yaml
 # 7. Watch pods come up
 kubectl get pods -n map-service -w
 ```
+
+## ElasticSearch and Kibana cannot install on VM because of limatation resources
+
+### Use a Reverse SSH Tunnel (Secure and No Public Exposure)
+This forwards a port on the VM to your local ES without exposing ES to the internet. Initiate the tunnel from your local machine (where ES runs).
+
+1. Set Up the Tunnel:
+From your local machine, run:textssh -f -N -R 9201:localhost:9200 lent@10.50.29.9
+-f: Runs in background.
+-N: No remote command.
+-R 9201:localhost:9200: Forwards port 9201 on the VM to port 9200 on your local machine.
+
+Full recommended version (safer & more reliable):
+```bash
+ssh -f -N -R 9201:localhost:9200 -o ServerAliveInterval=60 lent@10.50.29.9
+```
+The extra -o ServerAliveInterval=60 helps keep the tunnel alive longer if your network is flaky.
+
+If you use an SSH key instead of password (recommended):
+```Bash
+ssh -f -N -R 9201:localhost:9200 -i ~/.ssh/your_key lent@10.50.29.9
+```
+2. Update Your App's Script on the VM:
+In your app's configuration or connection script (e.g., in code or env vars), change the ES host from localhost:9200 to localhost:9201 (the forwarded port).
+- Example in Python (using elasticsearch-py):textfrom elasticsearch import Elasticsearch
+es = Elasticsearch(['http://localhost:9201'])  # Add auth if needed: hosts=[...], http_auth=('user', 'pass')
+- Or in a config file/ENV: Set ES_URL='http://localhost:9201'

@@ -25,7 +25,7 @@ const ES_URL = 'http://localhost:9200';
 // --- Map defaults ---
 const DEFAULT_CENTER = [46.6167, 24.8258]; // Riyadh
 const DEFAULT_ZOOM   = 12;
-const REQUEST_TIMEOUT = 20000; // ms
+const REQUEST_TIMEOUT = 65000; // ms
 
 // --- Facility display ---
 const FACILITY_COLORS = {
@@ -162,8 +162,11 @@ function createLayerSwitcher() {
                     // 'styledata' fires multiple times; 'idle' fires once the style is fully applied
                     map.once('idle', () => {
                         map.jumpTo({ center, zoom, pitch, bearing });
-                        if (state.currentMode === 'route' && state.currentRouteData) {
-                            addRouteLayer(state.currentRouteData, '#3b82f6');
+                        // currentRouteData is now always a plain array of FeatureCollections (or null when no route has been calculated yet)
+                        if (state.currentMode === 'route' && Array.isArray(state.currentRouteData)) {
+                            state.currentRouteData.forEach((route, i) => {
+                                addRouteLayer(route, getRouteColor(i), i === 0 ? 0.9 : 0.6, i === 0 ? 7 : 5, `route-${i}`);
+                            });
                         }
                     });
                 };
@@ -644,36 +647,43 @@ function handleRouteClick(lngLat) {
 }
 
 async function calculateRoute(start, end) {
+    // Always wipe any previous route before drawing the new one
+    clearRouteLayers();
     showInfo('⏳ Calculating routes...');
     try {
         const url = `${API_ENDPOINTS.route}?start_lon=${start.lng}&start_lat=${start.lat}&end_lon=${end.lng}&end_lat=${end.lat}&alternatives=${state.showAlternatives ? 3 : 1}&optimization=${state.routeOptimization}`;
         const data = await fetchWithTimeout(url);
         if (data.error) throw new Error(data.error);
 
-        if (data.routes && Array.isArray(data.routes)) {
-            clearRouteLayers();
-            data.routes.forEach((route, i) => {
-                addRouteLayer(route, getRouteColor(i), i === 0 ? 0.9 : 0.6, i === 0 ? 7 : 5, `route-${i}`);
-            });
-            state.currentRouteData = data.routes;
-            fitToMultipleRoutes(data.routes);
+        // Normalise: both branches produce a `routes` array so the rest of
+        // the function (and the style-reload handler) has one consistent shape.
+        const routes = (data.routes && Array.isArray(data.routes))
+            ? data.routes      // alternatives response:  { routes: [...] }
+            : [data];          // single-route response:  the FeatureCollection itself
 
-            const p = data.routes[0];
-            let summary = `✅ <strong>Best ${state.routeOptimization} route:</strong> ${p.duration_minutes} min • ${p.total_distance_km} km`;
-            if (data.routes.length > 1) {
-                summary += `<br><small>Showing ${data.routes.length} alternative routes</small>`;
-                data.routes.slice(1).forEach((r, i) => {
-                    summary += `<br><small style="color:#60a5fa;">Route ${i + 2}: ${r.duration_minutes} min • ${r.total_distance_km} km</small>`;
-                });
-            }
-            showInfo(summary);
+        // Store as a plain array — the style-reload handler iterates this directly
+        state.currentRouteData = routes;
+
+        routes.forEach((route, i) => {
+            addRouteLayer(route, getRouteColor(i), i === 0 ? 0.9 : 0.6, i === 0 ? 7 : 5, `route-${i}`);
+        });
+
+        if (routes.length > 1) {
+            fitToMultipleRoutes(routes);
         } else {
-            state.currentRouteData = data;
-            clearRouteLayers();
-            addRouteLayer(data, '#3b82f6', 0.9, 7, 'route-0');
-            fitToFeatures(data);
-            showInfo(`✅ Route: ${data.duration_minutes} min • ${data.total_distance_km} km`);
+            fitToFeatures(routes[0]);
         }
+
+        const best = routes[0];
+        let summary = `✅ <strong>Best ${state.routeOptimization} route:</strong> ${best.duration_minutes} min • ${best.total_distance_km} km`;
+        if (routes.length > 1) {
+            summary += `<br><small>Showing ${routes.length} alternative routes</small>`;
+            routes.slice(1).forEach((r, i) => {
+                summary += `<br><small style="color:#60a5fa;">Route ${i + 2}: ${r.duration_minutes} min • ${r.total_distance_km} km</small>`;
+            });
+        }
+        showInfo(summary);
+
     } catch (error) {
         handleError('Route calculation', error);
     }
@@ -684,12 +694,16 @@ function getRouteColor(index) {
 }
 
 function clearRouteLayers() {
-    for (let i = 0; i < 5; i++) {
+    // Remove every numbered alternative layer (generous upper bound)
+    for (let i = 0; i < 20; i++) {
         if (state.map.getLayer(`route-${i}`)) state.map.removeLayer(`route-${i}`);
         if (state.map.getSource(`route-${i}`)) state.map.removeSource(`route-${i}`);
     }
     if (state.map.getLayer('route'))  state.map.removeLayer('route');
     if (state.map.getSource('route')) state.map.removeSource('route');
+
+    // Also clear the stored route data so the style-reload handler does not re-add old routes when switching map styles.
+    state.currentRouteData = null;
 }
 
 function fitToMultipleRoutes(routes) {
@@ -1057,7 +1071,7 @@ function addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML) {
 
     state.map.addLayer({
         id, type: 'fill-extrusion', source: id,
-        paint: { 'fill-extrusion-color': '#ff5c00', 'fill-extrusion-opacity': 0.75, 'fill-extrusion-height': extrusionHeight, 'fill-extrusion-base': extrusionBase }
+        paint: { 'fill-extrusion-color': '#ff5c00', 'fill-extrusion-opacity': 0.95, 'fill-extrusion-height': ['+', extrusionHeight, 1], 'fill-extrusion-base': extrusionBase }
     }, beforeId);
 
     state.map.fitBounds(bounds, { padding: { top: 100, bottom: 100, left: 420, right: 100 }, pitch: 60, bearing: -18, minZoom: 16, maxZoom: 19.5, duration: 1600, essential: true });
