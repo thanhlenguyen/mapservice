@@ -259,6 +259,7 @@ data:
 ---
 # ============================================================================
 # SECTION 2: STORAGE
+# Persistent Volumes for PostGIS + ES + Kibana
 # ============================================================================
 
 apiVersion: v1
@@ -273,6 +274,35 @@ spec:
     requests:
       storage: 10Gi
   # storageClassName: local-path  # K3s default
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: es-data-pvc
+  namespace: map-service
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 8Gi
+  # storageClassName: local-path   # uncomment if needed (K3s default)
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kibana-data-pvc
+  namespace: map-service
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: local-path
 
 ---
 # ============================================================================
@@ -303,7 +333,7 @@ spec:
     spec:
       containers:
       - name: postgis
-        image: pgrouting/pgrouting:16-3.5-3.8
+        image: pgrouting/pgrouting:16-3.5-4.0
         ports:
         - containerPort: 5432
           name: postgres
@@ -392,7 +422,7 @@ spec:
     spec:
       containers:
       - name: martin
-        image: ghcr.io/maplibre/martin:latest
+        image: ghcr.io/maplibre/martin:1.4.0
         ports:
         - containerPort: 3000
           name: http
@@ -459,6 +489,154 @@ spec:
         hostPath:
           path: /mnt/d/Git/mapserver/styles_k3s/martin  # UPDATE THIS PATH
           type: DirectoryOrCreate
+
+---
+# ============================================================================
+# Elasticsearch Deployment (single node)
+# ============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch
+  namespace: map-service
+  labels:
+    app: elasticsearch
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+      - name: elasticsearch
+        image: docker.elastic.co/elasticsearch/elasticsearch:9.3.1
+        ports:
+        - containerPort: 9200
+          name: http
+        env:
+        - name: discovery.type
+          value: "single-node"
+        - name: xpack.security.enabled
+          value: "false"
+        - name: ES_JAVA_OPTS
+          value: "-Xms4g -Xmx4g"
+        - name: "bootstrap.memory_lock"
+          value: "true"
+        - name: logger.org.elasticsearch
+          value: "WARN"
+        - name: http.cors.enabled
+          value: "true"
+        - name: http.cors.allow-origin
+          value: '["*"]'
+        - name: http.cors.allow-methods
+          value: "OPTIONS,HEAD,GET,POST,PUT,DELETE"
+        - name: http.cors.allow-headers
+          value: "X-Requested-With,Content-Type,Content-Length,Authorization"
+        - name: http.cors.allow-credentials
+          value: "true"
+        volumeMounts:
+        - name: es-data
+          mountPath: /usr/share/elasticsearch/data
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1"
+          limits:
+            memory: "8Gi"
+            cpu: "1500m"
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - 'curl -s -f http://localhost:9200/_cat/health?h=status | grep -q green'
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30   # give it time to start
+        livenessProbe:
+          httpGet:
+            path: /_cat/health?h=status
+            port: 9200
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 10
+          failureThreshold: 5
+      volumes:
+      - name: es-data
+        persistentVolumeClaim:
+          claimName: es-data-pvc
+
+---
+
+# ============================================================================
+# Kibana Deployment
+# ============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: map-service
+  labels:
+    app: kibana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      containers:
+      - name: kibana
+        image: docker.elastic.co/kibana/kibana:9.3.1
+        ports:
+        - containerPort: 5601
+          name: http
+        env:
+        - name: ELASTICSEARCH_HOSTS
+          value: "http://elasticsearch:9200"
+        - name: SERVER_PUBLICBASEURL
+          value: "http://kibana.172-17-65-26.sslip.io"   # helps with some proxy / iframe issues
+        volumeMounts:
+        - name: kibana-data
+          mountPath: /usr/share/kibana/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1.5Gi"
+            cpu: "800m"
+        readinessProbe:
+          httpGet:
+            path: /api/status
+            port: 5601
+          initialDelaySeconds: 45
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+        livenessProbe:
+          httpGet:
+            path: /api/status
+            port: 5601
+          initialDelaySeconds: 90
+          periodSeconds: 20
+          timeoutSeconds: 10
+      volumes:
+      - name: kibana-data
+        persistentVolumeClaim:
+          claimName: kibana-data-pvc
 
 ---
 # ============================================================================
@@ -667,11 +845,11 @@ spec:
           value: "None"
         resources:
           requests:
-            memory: "256Mi"
-            cpu: "250m"
-          limits:
-            memory: "1Gi"
+            memory: "512Mi"
             cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
         readinessProbe:
           httpGet:
             path: /misc/ping
@@ -791,6 +969,8 @@ spec:
           name: frontend-nginx-config
 
 ---
+
+
 # ============================================================================
 # SECTION 4: SERVICES
 # ============================================================================
@@ -825,6 +1005,40 @@ spec:
   ports:
   - port: 3000
     targetPort: 3000
+    name: http
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: map-service
+  labels:
+    app: elasticsearch
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+  - port: 9200
+    targetPort: 9200
+    name: http
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: map-service
+  labels:
+    app: kibana
+spec:
+  selector:
+    app: kibana
+  ports:
+  - port: 5601
+    targetPort: 5601
     name: http
   type: ClusterIP
 
@@ -946,6 +1160,30 @@ spec:
             name: martin-service
             port:
               number: 3000
+
+  # Elasticsearch REST API
+  - host: elasticsearch.172-17-65-26.sslip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: elasticsearch
+            port:
+              number: 9200
+
+  # Kibana UI
+  - host: kibana.172-17-65-26.sslip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kibana
+            port:
+              number: 5601
 
   # Tileserver - MBTiles rendering
   - host: tileserver.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP

@@ -215,8 +215,8 @@ data:
           "mbtiles": "/data/mbtiles"
         },
         "domains": [
-          "tileserver.172-17-65-26.nip.io",
-          "map.172-17-65-26.nip.io"
+          "tileserver.172-17-65-26.sslip.io",
+          "map.172-17-65-26.sslip.io"
         ],
         "formatQuality": {
           "jpeg": 80,
@@ -311,6 +311,7 @@ data:
 ---
 # ============================================================================
 # SECTION 2: STORAGE
+# Persistent Volumes for PostGIS + ES + Kibana
 # ============================================================================
 
 apiVersion: v1
@@ -325,6 +326,35 @@ spec:
     requests:
       storage: 10Gi
   # storageClassName: local-path  # K3s default
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: es-data-pvc
+  namespace: map-service
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 8Gi
+  # storageClassName: local-path   # uncomment if needed (K3s default)
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kibana-data-pvc
+  namespace: map-service
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: local-path
 
 ---
 # ============================================================================
@@ -355,7 +385,7 @@ spec:
     spec:
       containers:
       - name: postgis
-        image: pgrouting/pgrouting:16-3.5-3.8
+        image: pgrouting/pgrouting:16-3.5-4.0
         ports:
         - containerPort: 5432
           name: postgres
@@ -444,7 +474,7 @@ spec:
     spec:
       containers:
       - name: martin
-        image: ghcr.io/maplibre/martin:latest
+        image: ghcr.io/maplibre/martin:1.4.0
         ports:
         - containerPort: 3000
           name: http
@@ -511,6 +541,152 @@ spec:
         hostPath:
           path: /mnt/d/Git/mapserver/styles_k3s/martin  # UPDATE THIS PATH
           type: DirectoryOrCreate
+
+---
+# ============================================================================
+# Elasticsearch Deployment (single node)
+# ============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch
+  namespace: map-service
+  labels:
+    app: elasticsearch
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+      - name: elasticsearch
+        image: docker.elastic.co/elasticsearch/elasticsearch:9.3.1
+        ports:
+        - containerPort: 9200
+          name: http
+        env:
+        - name: discovery.type
+          value: "single-node"
+        - name: xpack.security.enabled
+          value: "false"
+        - name: ES_JAVA_OPTS
+          value: "-Xms1g -Xmx1g"
+        - name: logger.org.elasticsearch
+          value: "WARN"
+        - name: http.cors.enabled
+          value: "true"
+        - name: http.cors.allow-origin
+          value: '["*"]'
+        - name: http.cors.allow-methods
+          value: "OPTIONS,HEAD,GET,POST,PUT,DELETE"
+        - name: http.cors.allow-headers
+          value: "X-Requested-With,Content-Type,Content-Length,Authorization"
+        - name: http.cors.allow-credentials
+          value: "true"
+        volumeMounts:
+        - name: es-data
+          mountPath: /usr/share/elasticsearch/data
+        resources:
+          requests:
+            memory: "1.5Gi"
+            cpu: "500m"
+          limits:
+            memory: "2.5Gi"
+            cpu: "1500m"
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - 'curl -s -f http://localhost:9200/_cat/health?h=status | grep -q green'
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30   # give it time to start
+        livenessProbe:
+          httpGet:
+            path: /_cat/health?h=status
+            port: 9200
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 10
+          failureThreshold: 5
+      volumes:
+      - name: es-data
+        persistentVolumeClaim:
+          claimName: es-data-pvc
+
+---
+
+# ============================================================================
+# Kibana Deployment
+# ============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: map-service
+  labels:
+    app: kibana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      containers:
+      - name: kibana
+        image: docker.elastic.co/kibana/kibana:9.3.1
+        ports:
+        - containerPort: 5601
+          name: http
+        env:
+        - name: ELASTICSEARCH_HOSTS
+          value: "http://elasticsearch:9200"
+        - name: SERVER_PUBLICBASEURL
+          value: "http://kibana.172-17-65-26.sslip.io"   # helps with some proxy / iframe issues
+        volumeMounts:
+        - name: kibana-data
+          mountPath: /usr/share/kibana/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1.5Gi"
+            cpu: "800m"
+        readinessProbe:
+          httpGet:
+            path: /api/status
+            port: 5601
+          initialDelaySeconds: 45
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+        livenessProbe:
+          httpGet:
+            path: /api/status
+            port: 5601
+          initialDelaySeconds: 90
+          periodSeconds: 20
+          timeoutSeconds: 10
+      volumes:
+      - name: kibana-data
+        persistentVolumeClaim:
+          claimName: kibana-data-pvc
 
 ---
 # ============================================================================
@@ -843,6 +1019,8 @@ spec:
           name: frontend-nginx-config
 
 ---
+
+
 # ============================================================================
 # SECTION 4: SERVICES
 # ============================================================================
@@ -877,6 +1055,40 @@ spec:
   ports:
   - port: 3000
     targetPort: 3000
+    name: http
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: map-service
+  labels:
+    app: elasticsearch
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+  - port: 9200
+    targetPort: 9200
+    name: http
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: map-service
+  labels:
+    app: kibana
+spec:
+  selector:
+    app: kibana
+  ports:
+  - port: 5601
+    targetPort: 5601
     name: http
   type: ClusterIP
 
@@ -968,15 +1180,15 @@ spec:
   # For HTTPS (uncomment after installing cert-manager):
   # tls:
   # - hosts:
-  #   - map.172-17-65-26.nip.io
-  #   - martin.172-17-65-26.nip.io
-  #   - tileserver.172-17-65-26.nip.io
-  #   - pgadmin.172-17-65-26.nip.io
-  #   - api.172-17-65-26.nip.io
+  #   - map.172-17-65-26.sslip.io
+  #   - martin.172-17-65-26.sslip.io
+  #   - tileserver.172-17-65-26.sslip.io
+  #   - pgadmin.172-17-65-26.sslip.io
+  #   - api.172-17-65-26.sslip.io
   #   secretName: map-tls-cert
   rules:
   # Frontend
-  - host: map.172-17-65-26.nip.io  # UPDATE: Replace with your node IP
+  - host: map.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP
     http:
       paths:
       - path: /
@@ -988,7 +1200,7 @@ spec:
               number: 80
 
   # Martin - Vector tiles and dynamic PostGIS layers
-  - host: martin.172-17-65-26.nip.io  # UPDATE: Replace with your node IP
+  - host: martin.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP
     http:
       paths:
       - path: /
@@ -999,8 +1211,32 @@ spec:
             port:
               number: 3000
 
+  # Elasticsearch REST API
+  - host: elasticsearch.172-17-65-26.sslip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: elasticsearch
+            port:
+              number: 9200
+
+  # Kibana UI
+  - host: kibana.172-17-65-26.sslip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kibana
+            port:
+              number: 5601
+
   # Tileserver - MBTiles rendering
-  - host: tileserver.172-17-65-26.nip.io  # UPDATE: Replace with your node IP
+  - host: tileserver.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP
     http:
       paths:
       - path: /
@@ -1012,7 +1248,7 @@ spec:
               number: 8080
 
   # PgAdmin - Database administration
-  - host: pgadmin.172-17-65-26.nip.io  # UPDATE: Replace with your node IP
+  - host: pgadmin.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP
     http:
       paths:
       - path: /
@@ -1024,7 +1260,7 @@ spec:
               number: 80
   
   # Routing API
-  - host: api.172-17-65-26.nip.io  # UPDATE: Replace with your node IP
+  - host: api.172-17-65-26.sslip.io  # UPDATE: Replace with your node IP
     http:
       paths:
       - path: /
@@ -1181,10 +1417,13 @@ kubectl get nodes -o wide
 ```
 - You should be able to access:
 ```
-http://map.172-17-65-26.nip.io              → main frontend
-http://tileserver.172-17-65-26.nip.io       → direct Tilserver
-http://martin.172-17-65-26.nip.io           → direct Martin API
-http://pgadmin.172-17-65-26.nip.io          → direct PgAdmin
+http://map.172-17-65-26.sslip.io              → main frontend
+http://tileserver.172-17-65-26.sslip.io       → direct Tilserver
+http://martin.172-17-65-26.sslip.io           → direct Martin
+http://pgadmin.172-17-65-26.sslip.io          → direct PgAdmin
+http://elasticsearch.172-17-65-26.sslip.io    → direct ElasticSearch
+http://kibana.172-17-65-26.sslip.io           → direct Kibana
+http://api.172-17-65-26.sslip.io              → direct Routing-API
 ```
 ### Individual Service Access (for debugging)
 
@@ -1213,29 +1452,55 @@ kubectl port-forward -n map-service svc/routing-api-service 5000:5000
 ```bash
 {
   "version": 8,
-  "name": "Martin All-in-One",
+  "name": "Base Map Style",
+  "metadata": {"maputnik:renderer": "mlgljs"},
+  "center": [46.6753, 24.7136],
+  "zoom": 10,
   "sources": {
-    "mbtiles-layer": {
-      "type": "vector",
-      "url": "http://map.172-17-65-26.nip.io/tileserver/data/Administrative.json"
+    "osm": {
+      "type": "raster",
+      "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      "tileSize": 256,
+      "attribution": "© OpenStreetMap contributors"
     },
-    "mbtiles-via-martin": {
+    "basemaps": {
       "type": "vector",
-      "tiles": ["http://martin.172-17-65-26.nip.io/Administrative/{z}/{x}/{y}.pbf"]
+      "tiles": ["http://martin.172-17-65-26.sslip.io/basemaps/{z}/{x}/{y}"],
+      "minzoom": 1,
+      "maxzoom": 12,
+      "attribution": "© OvertureMaps"
     },
-    "pmtiles-via-martin": {
+    "administrative": {
       "type": "vector",
-      "url": "pmtiles://http://martin.172-17-65-26.nip.io/pmtiles/yourfile.pmtiles"
+      "tiles": ["http://martin.172-17-65-26.sslip.io/administrative/{z}/{x}/{y}"],
+      "minzoom": 4,
+      "maxzoom": 12
     },
-    "dynamic-postgis": {
+    "city_district_zone": {
       "type": "vector",
-      "tiles": ["http://martin.172-17-65-26.nip.io/topology.your_table/{z}/{x}/{y}.pbf"]
+      "tiles": ["http://martin.172-17-65-26.sslip.io/city_district_zone/{z}/{x}/{y}"],
+      "minzoom": 9,
+      "maxzoom": 13
+    },
+    "address_layer": {
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.sslip.io/address_layer/{z}/{x}/{y}"],
+      "minzoom": 14,
+      "maxzoom": 15,
+      "attribution": "© National Address"
+    },
+    "street_centerline": {
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.sslip.io/street_centerline/{z}/{x}/{y}"],
+      "minzoom": 5,
+      "maxzoom": 15
+    },
+    "pois": {
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.sslip.io/topology.places/{z}/{x}/{y}"],
+      "minzoom": 12,
+      "maxzoom": 22
     }
-  },
-  "sprite": "http://martin.172-17-65-26.nip.io/sprites/basic",
-  "glyphs": "http://martin.172-17-65-26.nip.io/fonts/{fontstack}/{range}.pbf",
-  "layers": [...]
-}
 ```
 
 ## Step 9 Import your data into PostGIS
