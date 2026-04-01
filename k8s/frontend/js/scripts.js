@@ -4,14 +4,15 @@
 
 // --- All map styles  ---
 const STYLES = [
-    { id: 'basic-style', name: 'Default',   url: 'http://localhost:3001/styles/martin/style.json',     pitch: 0,  zoom: 12, bearing: 0   },
-    { id: 'sat-style',   name: 'Satellite', url: 'http://localhost:3001/styles/martin/style_sat.json', pitch: 0,  zoom: 12, bearing: 0   },
-    { id: '3d-style',    name: '3D',        url: 'http://localhost:3001/styles/martin/style_3d.json',  pitch: 45, zoom: 14, bearing: 0   },
-    { id: 'bdf-style',   name: 'BDF',       url: 'http://localhost:3001/styles/martin/style_bdf.json', pitch: 60, zoom: 17, bearing: -20 }
+    { id: 'basic-style',name: 'Default',   url: '/styles/mt-basic-style.json', pitch: 0, zoom: 10, bearing: 0 },
+    { id: 'sat-style',  name: 'Satellite', url: '/styles/mt-sat-style.json', pitch: 0, zoom: 10, bearing: 0 },
+    { id: '3d-style',   name: '3D',        url: '/styles/mt-3d-style.json', pitch: 45, zoom: 13, bearing: 0 },
+    { id: 'bdf-style',  name: 'BDF',       url: '/styles/mt-bdf-style.json', pitch: 60, zoom: 17, bearing: -20 }
 ];
 
-// --- Backend API ---
-const BACKEND_URL = 'http://localhost:5000';
+// Backend API configuration
+const BACKEND_URL = '/api';
+
 const API_ENDPOINTS = {
     route:           `${BACKEND_URL}/route`,
     tsp:             `${BACKEND_URL}/route/tsp`,
@@ -20,7 +21,7 @@ const API_ENDPOINTS = {
 };
 
 // --- Elasticsearch ---
-const ES_URL = 'http://localhost:9200';
+const ES_URL = '/es';
 
 // --- Map defaults ---
 const DEFAULT_CENTER = [46.6167, 24.8258]; // Riyadh
@@ -768,25 +769,11 @@ function fitToMultipleRoutes(routes) {
 // TSP MODE
 // ============================================================================
 
-const TSP_COLORS = [
-    '#9333ea', // 1 — purple
-    '#2563eb', // 2 — blue
-    '#16a34a', // 3 — green
-    '#dc2626', // 4 — red
-    '#d97706', // 5 — amber
-    '#0891b2', // 6 — cyan
-    '#db2777', // 7 — pink
-    '#65a30d', // 8 — lime
-];
-
 function handleTSPClick(lngLat) {
-    const index  = state.markers.tsp.length;
-    const num    = index + 1;
-    const color  = TSP_COLORS[index % TSP_COLORS.length];
-
-    const marker = new maplibregl.Marker({ element: createMarker(num.toString(), color) })
+    const num = state.markers.tsp.length + 1;
+    const marker = new maplibregl.Marker({ element: createMarker(num.toString(), '#9333ea') })
         .setLngLat(lngLat).addTo(state.map);
-    state.markers.tsp.push({ marker, lngLat, color });
+    state.markers.tsp.push({ marker, lngLat });
 
     if (state.markers.tsp.length < 3) {
         showInfo(`✅ Point ${num} added. Need ${3 - state.markers.tsp.length} more (min 3 points)`);
@@ -809,74 +796,21 @@ async function calculateTSP() {
         if (data.error) throw new Error(data.error);
         state.currentRouteData = data;
         clearRouteLayers();
-
-        // Draw one colored segment per leg using waypoint_order to map colors
-        // waypoint_order is the TSP-optimized visit sequence (0-based original indices)
-        // Each leg i → i+1 gets the color of the departure waypoint
-        const order  = data.waypoint_order;    // e.g. [0, 2, 1, 3]
-        const coords = data.features;          // GeoJSON features in TSP sequence
-
-        // Split features into per-leg groups using seq property, then draw each leg
-        // Since the API returns a flat FeatureCollection we draw it leg-by-leg:
-        // Leg 0 = waypoint_order[0] → waypoint_order[1], color = TSP_COLORS[order[0]]
-        // We re-use addRouteLayer per leg with a unique layerId.
-        const legFeatures = splitFeaturesIntoLegs(data.features, order.length - 1);
-
-        legFeatures.forEach((features, legIndex) => {
-            const departureWaypointIndex = order[legIndex];
-            const color = TSP_COLORS[departureWaypointIndex % TSP_COLORS.length];
-            addRouteLayer(
-                { type: 'FeatureCollection', features },
-                color, 0.9, 7,
-                `route-${legIndex}`
-            );
-        });
-
+        addRouteLayer(data, '#9333ea', 0.9, 7, 'route-0');
         fitToFeatures(data);
-        showInfo(`✅ <strong>TSP Optimized!</strong><br>Order: ${order.map(i => i + 1).join(' → ')}<br>${data.duration_minutes} min • ${data.total_distance_km} km`);
+        showInfo(`✅ <strong>TSP Optimized!</strong><br>Order: ${data.waypoint_order.map(i => i + 1).join(' → ')}<br>${data.duration_minutes} min • ${data.total_distance_km} km`);
     } catch (error) {
         handleError('TSP calculation', error);
     }
 }
 
-/**
- * Split a flat array of GeoJSON features into `legCount` roughly-equal groups.
- * The API returns segments sequentially for each leg, so we divide evenly.
- * If the backend ever adds a leg_index property we can use that instead.
- *
- * @param {object[]} features   — all GeoJSON features from the TSP response
- * @param {number}   legCount   — number of legs (waypoints - 1)
- * @returns {object[][]}        — array of feature arrays, one per leg
- */
-function splitFeaturesIntoLegs(features, legCount) {
-    // Prefer splitting by seq/leg metadata if available on the feature properties
-    const hasLegIndex = features.length > 0 && features[0].properties?.leg_index !== undefined;
-
-    if (hasLegIndex) {
-        const legs = [];
-        features.forEach(f => {
-            const i = f.properties.leg_index;
-            if (!legs[i]) legs[i] = [];
-            legs[i].push(f);
-        });
-        return legs;
-    }
-
-    // Fallback: divide features evenly across legs
-    const perLeg = Math.ceil(features.length / legCount);
-    const legs   = [];
-    for (let i = 0; i < legCount; i++) {
-        legs.push(features.slice(i * perLeg, (i + 1) * perLeg));
-    }
-    return legs;
-}
 // ============================================================================
 // NEAREST FACILITY MODE
 // ============================================================================
 
 function handleFacilityClick(lngLat) {
     cleanupFacilityMode();
-    state.markers.facility = new maplibregl.Marker({ element: createMarker('📍', '#dc2626'), anchor: 'bottom' })
+    state.markers.facility = new maplibregl.Marker({ element: createMarker('📍', '#dc2626') })
         .setLngLat(lngLat).addTo(state.map);
     showInfo('⏳ Searching nearest facilities...');
     calculateNearestFacilities(lngLat);
@@ -909,39 +843,6 @@ async function calculateNearestFacilities(lngLat) {
     }
 }
 
-// ── Geometry helpers for smart marker placement ───────────────────────────────
-
-function offsetCoordinate(lng, lat, distanceMeters, bearingDeg) {
-    const R  = 6_378_137;
-    const δ  = distanceMeters / R;
-    const θ  = (bearingDeg * Math.PI) / 180;
-    const φ1 = (lat        * Math.PI) / 180;
-    const λ1 = (lng        * Math.PI) / 180;
-    const sinφ2 = Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ);
-    const φ2    = Math.asin(sinφ2);
-    const λ2    = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * sinφ2);
-    return { lng: (λ2 * 180) / Math.PI, lat: (φ2 * 180) / Math.PI };
-}
-
-function wouldOccludePOI(map, lng, lat, thresholdPx = 24) {
-    const pt = map.project([lng, lat]);
-    return map.queryRenderedFeatures([
-        [pt.x - thresholdPx, pt.y - thresholdPx],
-        [pt.x + thresholdPx, pt.y + thresholdPx],
-    ]).some(f => f.layer.type === 'symbol');
-}
-
-function findClearPosition(map, lng, lat, bufferMeters = 10) {
-    if (!wouldOccludePOI(map, lng, lat)) return { lng, lat };
-    for (const bearing of [0, 45, 90, 135, 180, 225, 270, 315]) {
-        const c = offsetCoordinate(lng, lat, bufferMeters, bearing);
-        if (!wouldOccludePOI(map, c.lng, c.lat)) return c;
-    }
-    return offsetCoordinate(lng, lat, bufferMeters, 0); // north fallback
-}
-
-// ── Display ───────────────────────────────────────────────────────────────────
-
 function displayFacilityResults(lngLat, data, facilityType) {
     const allRouteFeatures = [];
     data.facilities.forEach((facility, index) => {
@@ -956,7 +857,6 @@ function displayFacilityResults(lngLat, data, facilityType) {
         state.map.addSource('facility-routes', { type: 'geojson', data: { type: 'FeatureCollection', features: allRouteFeatures } });
         state.map.addLayer({
             id: 'facility-routes', type: 'line', source: 'facility-routes',
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
             paint: {
                 'line-color': FACILITY_COLORS[facilityType] || '#6366f1',
                 'line-width': ['interpolate', ['linear'], ['get', 'facility_rank'], 1, 6, 5, 3],
@@ -965,56 +865,38 @@ function displayFacilityResults(lngLat, data, facilityType) {
         });
     }
 
-    // Fit bounds first so the correct tiles load, then place markers after idle
-    const bounds = new maplibregl.LngLatBounds();
-    bounds.extend([lngLat.lng, lngLat.lat]);
-    data.facilities.forEach(f => bounds.extend([parseFloat(f.facility_lon), parseFloat(f.facility_lat)]));
-    state.map.fitBounds(bounds, { padding: { top: 80, bottom: 80, left: 80, right: 80 }, maxZoom: 14, duration: 1000 });
+    state.facilityMarkers = data.facilities.map((facility, index) => {
+        const icon  = FACILITY_ICONS[facility.type] || '📍';
+        const color = FACILITY_COLORS[facility.type] || '#6366f1';
 
-    // Wait for tiles to render before checking POI occlusion
-    state.map.once('idle', () => {
-        state.facilityMarkers = data.facilities.map((facility, index) => {
-            const icon  = FACILITY_ICONS[facility.type] || '📍';
-            const color = FACILITY_COLORS[facility.type] || '#6366f1';
+        const el = document.createElement('div');
+        el.style.cssText = `width:48px;height:48px;background:${color};border:3px solid white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 4px 12px rgba(0,0,0,0.3);cursor:pointer;position:relative;`;
+        el.innerHTML = icon;
 
-            const rawLng = parseFloat(facility.facility_lon);
-            const rawLat = parseFloat(facility.facility_lat);
+        const badge = document.createElement('div');
+        badge.style.cssText = `position:absolute;top:-8px;right:-8px;width:24px;height:24px;background:white;border:2px solid ${color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;color:${color};`;
+        badge.textContent = index + 1;
+        el.appendChild(badge);
 
-            // Find a clear spot ~10m away if the exact coordinate sits on a POI
-            const pos = findClearPosition(state.map, rawLng, rawLat, 10);
+        const marker = new maplibregl.Marker({ element: el })
+            .setLngLat([parseFloat(facility.facility_lon), parseFloat(facility.facility_lat)])
+            .addTo(state.map);
 
-            const el = document.createElement('div');
-            el.style.cssText = `width:48px;height:48px;background:${color};border:3px solid white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 4px 12px rgba(0,0,0,0.3);cursor:pointer;position:relative;`;
-            el.innerHTML = icon;
-
-            const badge = document.createElement('div');
-            badge.style.cssText = `position:absolute;top:-8px;right:-8px;width:24px;height:24px;background:white;border:2px solid ${color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;color:${color};`;
-            badge.textContent = index + 1;
-            el.appendChild(badge);
-
-            // Marker placed at offset position, anchored at centre to avoid zoom drift
-            const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
-                .setLngLat([pos.lng, pos.lat])
+        el.addEventListener('click', () => {
+            new maplibregl.Popup({ offset: 25, closeButton: true, closeOnClick: true })
+                .setLngLat([parseFloat(facility.facility_lon), parseFloat(facility.facility_lat)])
+                .setHTML(`
+                    <div style="font-family:Inter,sans-serif;min-width:220px;">
+                        <div style="font-size:24px;margin-bottom:8px;">${icon}</div>
+                        <strong style="font-size:14px;color:#1f2937;">${facility.name}</strong>
+                        ${facility.address ? `<p style="margin:4px 0;font-size:12px;color:#6b7280;">${facility.address}</p>` : ''}
+                        <p style="margin:8px 0 0;font-size:13px;color:#059669;"><strong>⏱️ ${facility.travel_minutes} minutes</strong> drive</p>
+                        <p style="margin:4px 0 0;font-size:11px;color:#9ca3af;">Rank: #${index + 1}${facility.crow_distance_km ? ` • ${parseFloat(facility.crow_distance_km).toFixed(1)} km straight-line` : ''}</p>
+                    </div>`)
                 .addTo(state.map);
-
-            // Popup always opens at the TRUE facility coordinate
-            el.addEventListener('click', (e) => {
-                e.stopPropagation();
-                new maplibregl.Popup({ offset: 25, closeButton: true, closeOnClick: true })
-                    .setLngLat([rawLng, rawLat])
-                    .setHTML(`
-                        <div style="font-family:Inter,sans-serif;min-width:220px;">
-                            <div style="font-size:24px;margin-bottom:8px;">${icon}</div>
-                            <strong style="font-size:14px;color:#1f2937;">${facility.name}</strong>
-                            ${facility.address ? `<p style="margin:4px 0;font-size:12px;color:#6b7280;">${facility.address}</p>` : ''}
-                            <p style="margin:8px 0 0;font-size:13px;color:#059669;"><strong>⏱️ ${facility.travel_minutes} minutes</strong> drive</p>
-                            <p style="margin:4px 0 0;font-size:11px;color:#9ca3af;">Rank: #${index + 1}${facility.crow_distance_km ? ` • ${parseFloat(facility.crow_distance_km).toFixed(1)} km straight-line` : ''}</p>
-                        </div>`)
-                    .addTo(state.map);
-            });
-
-            return marker;
         });
+
+        return marker;
     });
 
     const closest = data.facilities[0];
@@ -1028,6 +910,11 @@ function displayFacilityResults(lngLat, data, facilityType) {
         ${closest.crow_distance_km ? `<br><small>Straight-line: ${closest.crow_distance_km.toFixed(1)} km</small>` : ''}
         <br><br><small style="font-size:0.85rem;">${list}</small>
     `);
+
+    const bounds = new maplibregl.LngLatBounds();
+    bounds.extend([lngLat.lng, lngLat.lat]);
+    data.facilities.forEach(f => bounds.extend([parseFloat(f.facility_lon), parseFloat(f.facility_lat)]));
+    state.map.fitBounds(bounds, { padding: { top: 80, bottom: 80, left: 80, right: 80 }, maxZoom: 14, duration: 1000 });
 }
 
 // ============================================================================

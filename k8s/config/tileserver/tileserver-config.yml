@@ -1,0 +1,76 @@
+{
+  "options": {
+    "paths": {
+        "root": "/mapservice/tileserver",
+        "fonts": "/mapservice/tileserver/fonts",
+        "sprites": "/mapservice/tileserver/sprites",
+        "styles": "/mapservice/tileserver/styles",
+        "mbtiles": "/mapservice/data/mbtiles",
+        "pmtiles": "/mapservice/data/pmtiles"
+    },
+    "domains": [
+        "map-tiles-tileserver.address.gov.sa"
+        
+    ],
+    "formatQuality": {
+        "jpeg": 85,
+        "webp": 95
+    },
+    "maxScaleFactor": 3,
+    "maxSize": 2048,
+    "pbfAlias": "pbf",
+    "serveAllFonts": false,
+    "serveAllStyles": false,
+    "serveStaticMaps": true,
+    "staticAttributionText": "© OpenMapTiles © OpenStreetMap contributors"
+  },
+  "styles": {
+    "basic-style": {
+        "style": "style.json",
+        "tilejson": {
+        "type": "overlay",
+        "bounds": [-180, -85.0511, 180, 85.0511]
+        }
+    },
+    "sat-style": {
+        "style": "style_sat.json",
+        "tilejson": {
+        "type": "overlay",
+        "bounds": [-180, -85.0511, 180, 85.0511]
+        }
+    },
+    "3d-style": {
+        "style": "style_3d.json",
+        "tilejson": {
+        "type": "overlay",
+        "bounds": [-180, -85.0511, 180, 85.0511]
+        }
+    }
+  },
+  "data": {
+    "Administrative": {
+        "mbtiles": "Administrative.mbtiles"
+    },
+    "City_District_Zone": {
+        "mbtiles": "City_District_Zone.mbtiles"
+    },
+    "address_layer": {
+        "mbtiles": "address_layer.mbtiles"
+    },
+    "street_centerline": {
+        "mbtiles": "street_centerline.mbtiles"
+    },
+    "satellite-10-7": {
+        "mbtiles": "3ED20D606614402A9490917D67A395E7.mbtiles"
+    },
+    "satellite-9-6": {
+        "mbtiles": "598D39F2059E4607B22D4A0EE86E8BD5.mbtiles"
+    },
+    "satellite-10-6": {
+        "mbtiles": "9248D0C1038F40CEA524DEB60CC35C06.mbtiles"
+    },
+    "satellite-9-7": {
+        "mbtiles": "2812072D27F7437EA9CEF8014947A278.mbtiles"
+    }                
+  }
+} 

@@ -263,15 +263,30 @@ function setupDraggablePanel() {
     if (!panel || !header) return;
 
     let isDragging = false;
-    let initialX, initialY, currentX, currentY;
+    let initialX = 0;
+    let initialY = 0;
+    let currentX = 0;
+    let currentY = 0;
 
     const dragStart = (e) => {
+        // Prevent dragging when clicking the close button
         if (e.target.closest('.close-btn')) return;
+
         const touch = e.touches?.[0] || e;
-        initialX = touch.clientX - (state.panelPosition?.x || 0);
-        initialY = touch.clientY - (state.panelPosition?.y || 0);
+        const rect = panel.getBoundingClientRect();   // Get real current position
+
+        // Calculate offset so the panel doesn't jump when dragging starts
+        initialX = touch.clientX - rect.left;
+        initialY = touch.clientY - rect.top;
+
         isDragging = true;
         state.isDragging = true;
+        
+        // Switch to left/top positioning for smooth dragging (more reliable)
+        panel.style.right = 'auto';
+        panel.style.left = rect.left + 'px';
+        panel.style.top = rect.top + 'px';
+        panel.style.transform = 'none';   // Clear any previous transform
     };
 
     const drag = (e) => {
@@ -280,32 +295,49 @@ function setupDraggablePanel() {
         const touch = e.touches?.[0] || e;
         currentX = Math.max(0, Math.min(touch.clientX - initialX, window.innerWidth  - panel.offsetWidth));
         currentY = Math.max(0, Math.min(touch.clientY - initialY, window.innerHeight - panel.offsetHeight));
-        state.panelPosition = { x: currentX, y: currentY };
-        panel.style.left      = 'auto';
-        panel.style.right     = 'auto';
-        panel.style.top       = 'auto';
-        panel.style.transform = `translate(${currentX}px, ${currentY}px)`;
+        // Apply position directly using left/top (most stable method)
+        panel.style.left = currentX + 'px';
+        panel.style.top = currentY + 'px';
+        panel.style.transform = 'none';
     };
 
     const dragEnd = () => { isDragging = false; state.isDragging = false; };
 
+        // Event listeners
     header.addEventListener('mousedown',  dragStart);
     header.addEventListener('touchstart', dragStart, { passive: false });
+
     document.addEventListener('mousemove',  drag);
     document.addEventListener('touchmove',  drag, { passive: false });
+
     document.addEventListener('mouseup',    dragEnd);
     document.addEventListener('touchend',   dragEnd);
 }
 
 function resetPanelPosition() {
     const panel = document.getElementById('feature-info-panel');
-    if (panel) {
-        panel.style.left      = 'auto';
-        panel.style.right     = '1rem';
-        panel.style.top       = '1rem';
-        panel.style.transform = 'none';
-        state.panelPosition   = null;
-    }
+    if (!panel) return;
+
+    // Reset to original nice position (top-right with some margin)
+    panel.style.left      = 'auto';
+    panel.style.right     = '1rem';
+    panel.style.top       = '1rem';
+    panel.style.bottom    = 'auto';
+    panel.style.transform = 'none';
+    
+    // Clear stored position
+    state.panelPosition   = null;    
+}
+
+// Optional: Add this helper to smoothly reposition the panel if needed later
+function repositionPanel(x, y) {
+    const panel = document.getElementById('feature-info-panel');
+    if (!panel) return;
+
+    panel.style.left = x + 'px';
+    panel.style.top = y + 'px';
+    panel.style.right = 'auto';
+    panel.style.transform = 'none';
 }
 
 function handleInfoPointerClick(e) {
@@ -429,6 +461,22 @@ function injectMapButtons() {
     ctrlGroup.appendChild(infoBtn);
     ctrlGroup.appendChild(panelBtn);
     topRight.appendChild(ctrlGroup);
+
+    const panel = document.querySelector('.control-panel.header');
+    if (panel) {
+        panel.addEventListener('click', function expandIfMinimised(e) {
+            // Prevent expanding when clicking interactive children (safety net)
+            if (e.target.closest('button, input, select, label, .mode-btn, .route-opt-btn, .range-slider')) {
+                return;
+            }
+
+            // Only act if currently minimised
+            if (!panel.classList.contains('panel-minimised')) return;
+
+            // Trigger the same toggle logic as the button
+            toggleControlPanel(panelBtn);
+        });
+    }
 }
 
 function toggleControlPanel(btn) {

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Simple Click to See Info</title>
+    
+    <!-- These two lines load the MapLibre library (the tool that shows the map) -->
+    <script src="https://unpkg.com/maplibre-gl@4.7.0/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@4.7.0/dist/maplibre-gl.css" rel="stylesheet">
+    
+    <style>
+        body { margin:0; font-family: Arial; }
+        #map { position: absolute; top:0; bottom:0; width:100%; }
+        
+        .info-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: white;
+            width: 50px;
+            height: 50px;
+            font-size: 28px;
+            border: none;
+            border-radius: 50%;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+        .info-btn.active { background: #3b82f6; color: white; }
+
+        #info-panel {
+            position: absolute;
+            top: 90px;
+            right: 20px;
+            width: 320px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.25);
+            display: none;
+            flex-direction: column;
+            max-height: 70vh;
+            z-index: 1001;
+        }
+        .header {
+            background: #1f2937;
+            color: white;
+            padding: 12px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+        }
+        .content {
+            padding: 15px;
+            overflow-y: auto;
+            font-size: 14px;
+        }
+        .property {
+            margin: 8px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #eee;
+        }
+        .key { font-weight: bold; color: #444; }
+    </style>
+</head>
+<body>
+
+    <!-- This is where the map appears -->
+    <div id="map"></div>
+
+    <!-- The info button (ℹ️) -->
+    <button class="info-btn" id="info-btn">ℹ️</button>
+
+    <!-- The panel that shows information -->
+    <div id="info-panel">
+        <div class="header">
+            <span>Feature Information</span>
+            <button id="close-btn" style="background:none;border:none;color:white;font-size:20px;cursor:pointer;">✕</button>
+        </div>
+        <div class="content" id="content">
+            Click the ℹ️ button, then click on the map
+        </div>
+    </div>
+
+    <script>
+        // === PART 1: Variables (Storage) ===
+        let map;           // This will hold the map object
+        let isActive = false;   // Is the "click to see info" tool turned ON? (true or false)
+
+        // === PART 2: Start the map ===
+        function startMap() {
+            
+            // Create a new map and save it in the variable "map"
+            map = new maplibregl.Map({
+                container: 'map',                    // Put the map inside the <div id="map">
+                style: 'http://localhost:3001/styles/martin/style.json',  // Where the map design comes from
+                center: [46.6167, 24.8258],          // Starting position (longitude, latitude)
+                zoom: 12                             // How close the map starts
+            });
+
+            // When the map has finished loading, print a message in the console
+            map.on('load', () => {
+                console.log("Map is ready!");
+            });
+
+            // === MOST IMPORTANT PART ===
+            // Every time user clicks on the map, this function runs
+            map.on('click', function(e) {
+                
+                // If the info tool is OFF, do nothing
+                if (!isActive) return;
+
+                // Ask the map: "What features are at the point I just clicked?"
+                // "features" is an array (list) of things on the map at that location
+                const features = map.queryRenderedFeatures(e.point);
+
+                // If no features were found
+                if (features.length === 0) {
+                    document.getElementById('content').innerHTML = "<p>No feature found here.</p>";
+                    return;
+                }
+
+                // Take the first (top) feature that was clicked
+                showFeatureInfo(features[0]);
+            });
+        }
+
+        // === PART 3: Show information of the clicked feature ===
+        function showFeatureInfo(feature) {
+            
+            // Start building the HTML text we will show
+            let html = `<p><strong>Layer:</strong> ${feature.layer.id}</p>`;
+            html += `<p><strong>Type:</strong> ${feature.geometry.type}</p><hr>`;
+
+            // "feature.properties" contains all the real information (name, address, type, etc.)
+            const props = feature.properties || {};
+
+            // Loop through every piece of information
+            for (let key in props) {
+                let value = props[key];
+                if (value === null) value = "—";
+                
+                html += `
+                    <div class="property">
+                        <span class="key">${key}:</span> 
+                        ${value}
+                    </div>`;
+            }
+
+            // Put the finished HTML into the panel
+            document.getElementById('content').innerHTML = html;
+            document.getElementById('info-panel').style.display = 'flex';
+        }
+
+        // === PART 4: Button click - Turn tool ON / OFF ===
+        document.getElementById('info-btn').addEventListener('click', function() {
+            isActive = !isActive;                    // Change true <-> false
+            this.classList.toggle('active', isActive); // Change button color
+            
+            if (isActive) {
+                document.getElementById('content').innerHTML = "Now click on any feature on the map";
+            }
+        });
+
+        // === PART 5: Close button ===
+        document.getElementById('close-btn').addEventListener('click', function() {
+            document.getElementById('info-panel').style.display = 'none';
+            isActive = false;
+            document.getElementById('info-btn').classList.remove('active');
+        });
+
+        // === PART 6: Start everything when page loads ===
+        window.onload = startMap;
+
+    </script>
+</body>
+</html>
