@@ -338,19 +338,54 @@ body {
 }
 
 /* ==========================================================================
-   INFO/RESULT PANEL
+   INFO / RESULT PANEL
+   --------------------------------------------------------------------------
+   Previously this was a floating .control-panel positioned at bottom-center
+   via `position: absolute; left: 50%; transform: translateX(-50%); bottom: 1.5rem`.
+
+   It is now placed INSIDE #search-control in the HTML, so it flows naturally
+   below the results list on the left side. We override all the old absolute-
+   positioning rules and make it a plain in-flow block.
    ========================================================================== */
-.control-panel.info-panel {
-    bottom: 1.5rem;
-    z-index: 15;
-    text-align: center;
-    padding: 1rem 1.5rem;
+#info-box {
+    /* Cancel out the base .control-panel absolute positioning */
+    position: static !important;
+    left: auto !important;
+    bottom: auto !important;
+    top: auto !important;
+    transform: none !important;
+
+    /* Flow naturally inside the search panel */
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+
+    /* Visual treatment — light blue tint to distinguish from results */
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    padding: 10px 12px;
+
+    /* Override the .control-panel base box-shadow / border */
+    box-shadow: none;
+    min-width: unset;
+    max-width: unset;
+
+    /* Make sure it's scrollable if the info text is very long */
+    max-height: 220px;
+    overflow-y: auto;
+
+    /* Keep pointer events active so links inside work */
+    pointer-events: auto !important;
 }
 
+/* The .hidden utility still works — display: none !important wins over static */
+
 .info-text {
-    font-size: 1rem;
-    color: #1f2937;
+    font-size: 0.875rem;   /* 14px — slightly smaller than before to fit the narrower panel */
+    color: #1e40af;        /* dark blue to complement the light blue background */
     margin: 0;
+    line-height: 1.6;
 }
 
 /* ==========================================================================
@@ -565,18 +600,14 @@ body {
 /* ==========================================================================
    POINTER EVENTS (Critical for map interaction)
    ========================================================================== */
-/* Let clicks pass through floating panels to the map underneath */
-.control-panel.info-panel {
-    pointer-events: none;
-}
 
 /* But keep ALL interactive elements in header clickable */
 .control-panel.header,
 .control-panel.header *,
 .control-panel.feature-info-panel,
 .control-panel.feature-info-panel *,
-#info-box,
-#info-box * {
+#search-control,
+#search-control * {
     pointer-events: auto;
 }
 
@@ -673,6 +704,15 @@ body {
     min-width: unset;
     max-width: unset;
     border: 1px solid #e0f2fe;
+
+    /*
+     * The search panel now also contains #info-box.
+     * Allow it to grow vertically but cap it so it doesn't
+     * swallow the whole screen on a small display.
+     */
+    max-height: calc(100vh - 20px);
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 /* Dataset selector styling */
@@ -920,6 +960,7 @@ body {
         width: calc(100vw - 20px);
         left: 10px;
         right: 10px;
+        max-height: calc(100vh - 20px);
     }
 
     .dataset-selector {
@@ -928,8 +969,12 @@ body {
     }
 
     .results-list {
-        max-height: 240px;
-    }    
+        max-height: 180px;
+    }
+
+    #info-box {
+        max-height: 160px;
+    }
 }
 
 @media (max-width: 400px) {

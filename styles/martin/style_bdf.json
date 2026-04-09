@@ -62,7 +62,7 @@
       "maxzoom": 22
     }
   },
-  "sprite": "sprite",
+  "sprite": "sprites/sprite",
   "glyphs": "fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
