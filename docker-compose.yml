@@ -22,6 +22,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.3.1
     container_name: elasticsearch
@@ -71,7 +72,7 @@ services:
       retries: 5
 
   martin:
-    image: ghcr.io/maplibre/martin:1.3.1   # official image
+    image: ghcr.io/maplibre/martin:1.4.0   # official image
     container_name: martin_server
     restart: unless-stopped
     env_file:
@@ -120,7 +121,7 @@ services:
         condition: service_healthy
         
   pgadmin:
-    image: dpage/pgadmin4:9.12.0
+    image: dpage/pgadmin4:9.13.0
     container_name: pgadmin4
     restart: always
     env_file: 

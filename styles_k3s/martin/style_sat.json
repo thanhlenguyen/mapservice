@@ -19,6 +19,13 @@
       "minzoom": 12,
       "maxzoom": 22
     },
+    "basemaps": {
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.sslip.io/basemaps/{z}/{x}/{y}"],
+      "minzoom": 1,
+      "maxzoom": 12,
+      "attribution": "© OvertureMaps"
+    },
     "administrative": {
       "type": "vector",
       "tiles": ["http://martin.172-17-65-26.sslip.io/administrative/{z}/{x}/{y}"],
@@ -73,6 +80,40 @@
       "minzoom": 12,
       "maxzoom": 24,
       "layout": {"visibility": "visible"}
+    },
+    {
+      "id": "international-background",
+      "type": "line",
+      "source": "basemaps",
+      "source-layer": "international",
+      "layout": {},
+      "paint": {"line-width": 3, "line-color": "hsl(0, 40%, 65%)"}
+    },
+    {
+      "id": "international-boundary",
+      "type": "line",
+      "source": "basemaps",
+      "source-layer": "international",
+      "layout": {},
+      "paint": {
+          "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              4,
+              1.5,
+              10,
+              2
+          ],
+          "line-dasharray": [
+              "step",
+              ["zoom"],
+              ["literal", [2, 2]],
+              7,
+              ["literal", [6, 6, 2, 2]]
+          ],
+          "line-color": "hsl(0, 16%, 94%)"
+      }
     },
     {
       "id": "emirate_bg",

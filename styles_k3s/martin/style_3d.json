@@ -11,6 +11,13 @@
       "tileSize": 256,
       "attribution": "© CARTO"
     },
+    "basemaps": {
+      "type": "vector",
+      "tiles": ["http://martin.172-17-65-26.sslip.io/basemaps/{z}/{x}/{y}"],
+      "minzoom": 1,
+      "maxzoom": 12,
+      "attribution": "© OvertureMaps"
+    },
     "administrative": {
       "type": "vector",
       "tiles": ["http://martin.172-17-65-26.sslip.io/administrative/{z}/{x}/{y}"],
@@ -27,7 +34,8 @@
       "type": "vector",
       "tiles": ["http://martin.172-17-65-26.sslip.io/address_layer/{z}/{x}/{y}"],
       "minzoom": 14,
-      "maxzoom": 15
+      "maxzoom": 15,
+      "attribution": "© National Address"
     },
     "street_centerline": {
       "type": "vector",
@@ -46,12 +54,136 @@
   "glyphs": "fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
+      "id": "background",
+      "type": "background",
+      "paint": {"background-color": "#ece1cb"}
+    },
+    {
       "id": "osm-base",
       "type": "raster",
       "source": "osm",
       "minzoom": 0,
       "maxzoom": 22,
-      "layout": {"visibility": "visible"}
+      "layout": {"visibility": "none"}
+    },    
+    {
+      "id": "ocean",
+      "type": "fill",
+      "source": "basemaps",
+      "source-layer": "ocean",
+      "layout": {"visibility": "visible"},
+      "paint": {"fill-color": "#78bced"}
+    },
+    {
+      "id": "country boundaries",
+      "type": "line",
+      "source": "basemaps",
+      "source-layer": "country_boundaries",
+      "layout": {"visibility": "visible"},      
+      "paint": {
+          "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              4,
+              0.5,
+              10,
+              0.8
+          ],
+          "line-color": "#3c3939",
+          "line-dasharray": [
+              "step",
+              ["zoom"],
+              ["literal", [2, 2]],
+              7,
+              ["literal", [6, 2, 2, 2]]
+          ]
+      }
+    },
+    {
+      "id": "landuse-natural",
+      "type": "fill",
+      "source": "basemaps",
+      "source-layer": "landwater",
+      "minzoom": 5,
+      "maxzoom": 22,
+      "layout": {},
+      "paint": {
+        "fill-color": [
+            "match", ["get", "subtype"],
+            ["forest", "tree"], "#add19e",
+            ["grass", "shrub"], "#d8e8c8",
+            ["sand", "beach"], "#e9ddbe",
+            ["rock", "crater", "physical"], "#e0dedb",
+            ["wetland"], "#dbe4e1",
+            ["reef"], "#cadbe3",
+            ["ocean", "lake", "water"], "#aad3df",
+            ["river", "stream", "canal"], "#a0cfdf",
+            ["pond", "reservoir", "spring"], "#b7dae3",
+            ["human_made", "wastewater"], "#adbcc1",
+            "#f1eee8"
+          ],
+        "fill-opacity": [
+          "interpolate", ["linear"], ["zoom"],
+          5, 0.4,
+          12, 1.0
+        ]
+      }
+    },  
+    {
+      "id": "landuse-built",
+      "type": "fill",
+      "source": "basemaps",
+      "source-layer": "land_use",
+      "minzoom": 6,
+      "maxzoom": 22,
+      "layout": {},
+      "paint": {
+          "fill-color": [
+              "match", ["get", "subtype"],
+              ["park", "recreation", "campground", "protected", "managed"], "#d8e8c8",
+              ["residential", "developed", "pedestrian"], "#f1eee8",
+              ["education", "medical", "religious"], "#f0e7d1",
+              ["golf", "agriculture", "horticulture", "aquaculture"], "#def3ca",
+              ["transportation", "landfill", "resource_extraction", "construction"], "#ebe7e3",
+              ["military", "cemetery"], "#e1e4e1",
+              ["entertainment"], "#f5e6d3",
+              "#f1eee8"
+            ],
+          "fill-opacity": 0.7
+        }
+    },
+    {
+      "id": "international_background",
+      "type": "line",      
+      "source": "basemaps",
+      "source-layer": "international",
+      "paint": {"line-width": 3, "line-color": "hsl(0, 3%, 97%)"}
+  },
+    {
+      "id": "international-boundary",
+      "type": "line",
+      "source": "basemaps",
+      "source-layer": "international",
+      "paint": {
+          "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              4,
+              1.5,
+              10,
+              2
+          ],
+          "line-color": "#3c3939",
+          "line-dasharray": [
+              "step",
+              ["zoom"],
+              ["literal", [2, 2]],
+              7,
+              ["literal", [6, 2, 2, 2]]
+          ]
+      }
     },
     {
       "id": "emirate_bg",

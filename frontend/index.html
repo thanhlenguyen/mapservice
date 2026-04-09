@@ -22,7 +22,7 @@
     <div id="map">
 
         <!-- ── APP 1: Main floating control panel ── -->
-        <div class="control-panel header">
+        <div class="control-panel header panel-minimised">
             <!-- Compact label shown when panel is minimised -->
             <span class="panel-minimised-label">🗺️ Routing &amp; Services</span> 
             <div class="header-content">
@@ -129,11 +129,6 @@
             </p>
         </div>    
 
-        <!-- Result / info panel -->
-        <div id="info-box" class="control-panel info-panel hidden">
-            <p id="route-info" class="info-text">Click to start</p>
-        </div>
-        
         <!-- Feature Info Panel (for info pointer mode) -->
         <div id="feature-info-panel" class="control-panel feature-info-panel hidden">
             <div class="feature-info-header">
@@ -161,6 +156,17 @@
 
             <!-- Results list -->
             <div id="results" class="results-list"></div>
+
+            <!--
+                Result / Info panel — MOVED HERE from bottom-center.
+                It now flows naturally below the results list inside the
+                left-side search panel. showInfo() in scripts.js still
+                works unchanged because it targets #info-box by ID.
+            -->
+            <div id="info-box" class="info-panel hidden">
+                <p id="route-info" class="info-text">Click to start</p>
+            </div>
+
         </div>
 
     </div>

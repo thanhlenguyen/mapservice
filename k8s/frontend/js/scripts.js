@@ -1,74 +1,32 @@
 // ============================================================================
-// ROUTING & SERVICES ANALYSIS APPLICATION
-// ============================================================================
-// This application provides:
-// - Route planning (A→B and multi-point TSP optimization)
-// - Nearest facility finding (hospitals, fire stations, police)
-// - Service area calculation (reachability analysis)
-// - Building/unit search with 3D visualization
-// - Feature inspection tool (info pointer)
+// CONFIGURATION & CONSTANTS
 // ============================================================================
 
-// ============================================================================
-// SECTION 1: CONFIGURATION & CONSTANTS
-// ============================================================================
-// All application settings and fixed values are defined here
-// Change these values to customize the application behavior
-
-// --- Map Style Definitions ---
-// Each style is a different way of looking at the map.
-// pitch  = how much the map tilts (0 = flat top-down, 60 = tilted like a 3D view)
-// zoom   = how close/far the initial camera is
-// bearing = compass rotation (0 = north up, 45 = rotated 45 degrees clockwise)
+// --- All map styles  ---
 const STYLES = [
-    { 
-        id: 'basic-style', 
-        name: 'Default', 
-        url: 'http://localhost:3001/styles/martin/style.json', 
-        pitch: 0,
-        bearing: 0 
-    },
-    { 
-        id: 'sat-style', 
-        name: 'Satellite', 
-        url: 'http://localhost:3001/styles/martin/style_sat.json', 
-        pitch: 0, 
-        bearing: 0 
-    },
-    { 
-        id: '3d-style', 
-        name: '3D', 
-        url: 'http://localhost:3001/styles/martin/style_3d.json', 
-        pitch: 45,
-        bearing: 0 
-    },
-    { 
-        id: 'bdf-style', 
-        name: 'BDF', 
-        url: 'http://localhost:3001/styles/martin/style_bdf.json', 
-        pitch: 60, 
-        bearing: -20 
-    }
+    { id: 'basic-style',name: 'Default',   url: '/styles/mt-basic-style.json', pitch: 0, zoom: 10, bearing: 0 },
+    { id: 'sat-style',  name: 'Satellite', url: '/styles/mt-sat-style.json', pitch: 0, zoom: 10, bearing: 0 },
+    { id: '3d-style',   name: '3D',        url: '/styles/mt-3d-style.json', pitch: 45, zoom: 13, bearing: 0 },
+    { id: 'bdf-style',  name: 'BDF',       url: '/styles/mt-bdf-style.json', pitch: 60, zoom: 17, bearing: -20 }
 ];
 
-// --- Backend API Configuration ---
-// URL endpoints for routing and analysis services
-const BACKEND_URL = 'http://localhost:5000';
+// Backend API configuration
+const BACKEND_URL = '/api';
+
 const API_ENDPOINTS = {
-    route:           `${BACKEND_URL}/route`,             // Calculate A→B route
-    tsp:             `${BACKEND_URL}/route/tsp`,          // Solve multi-point optimal route
-    nearestFacility: `${BACKEND_URL}/nearest_facility`,   // Find nearby hospitals/police/etc.
-    serviceArea:     `${BACKEND_URL}/service_area`        // Find reachable area in X minutes
+    route:           `${BACKEND_URL}/route`,
+    tsp:             `${BACKEND_URL}/route/tsp`,
+    nearestFacility: `${BACKEND_URL}/nearest_facility`,
+    serviceArea:     `${BACKEND_URL}/service_area`
 };
 
-// --- Elasticsearch Configuration ---
-// Elasticsearch is a search engine used to find buildings and floors by name/address.
-const ES_URL = 'http://localhost:9200';
+// --- Elasticsearch ---
+const ES_URL = '/es';
 
-// --- Map Default Settings ---
-const DEFAULT_CENTER = [46.6167, 24.8258]; // Riyadh coordinates [lng, lat]
-const DEFAULT_ZOOM = 12;                    // Initial zoom level
-const REQUEST_TIMEOUT = 65000;              //// How many milliseconds to wait before giving up on an API call (65 seconds)
+// --- Map defaults ---
+const DEFAULT_CENTER = [46.6167, 24.8258]; // Riyadh
+const DEFAULT_ZOOM   = 12;
+const REQUEST_TIMEOUT = 65000; // ms
 
 // --- Facility Display Configuration ---
 // Colors and icons for different facility types
@@ -172,7 +130,6 @@ let currentDataset    = 'units';       // Which Elasticsearch index to search: '
 let currentStyleId    = 'basic-style'; // Which map style is currently active
 let currentHighlightIds = [];          // Layer IDs for 3D search highlights (so we can remove them)
 let currentPopup      = null;          // The currently open map popup (so we can close it later)
-let _facilitySearchId  = 0;             // Used to prevent race conditions in facility search
 
 
 // ============================================================================
@@ -238,7 +195,7 @@ function initMap() {
 }
 
 // ============================================================================
-// SECTION 4: MAP CONTROLS & UI HELPERS
+// SECTION 4: MAP CONTROLS
 // ============================================================================
 // Custom buttons and controls that appear on the map itself.
 
@@ -312,6 +269,138 @@ async function switchMapStyle(style) {
             case 'tsp':      restoreTSPRoute();       break;
             case 'facility': restoreFacilityData();   break;
             case 'service':  restoreServiceArea();    break;
+        }
+    });
+}
+
+// --- Restore functions ---
+// Each function redraws one mode's data after a style switch.
+// They read from the saved state (currentRouteData, lastFacilityData, etc.)
+// so no new API calls are needed.
+
+/** Redraw A→B route(s) after a style switch */
+function restoreRouteLayers() {
+    if (!Array.isArray(state.currentRouteData)) return;
+    state.currentRouteData.forEach((route, i) => {
+        addRouteLayer(route, getRouteColor(i), i === 0 ? 0.9 : 0.6, i === 0 ? 7 : 5, `route-${i}`);
+    });
+}
+
+/**
+ * Redraw TSP route + re-add all waypoint markers after a style switch.
+ * Each marker uses the same color it had originally (stored in state.markers.tsp).
+ */
+function restoreTSPRoute() {
+    if (!state.lastTSPRouteData) return;
+
+    // Re-draw each colored route segment
+    // state.lastTSPRouteData is an array: one FeatureCollection per segment
+    state.lastTSPRouteData.forEach((segmentData, i) => {
+        const color = TSP_COLORS[i % TSP_COLORS.length];
+        addRouteLayer(segmentData, color, 0.9, 6, `tsp-segment-${i}`);
+    });
+
+    // Re-add the numbered markers (they disappear when the style is swapped)
+    state.markers.tsp.forEach((item, index) => {
+        // Remove the old marker object (it's been detached from the map by the style change)
+        if (item.marker) item.marker.remove();
+
+        // Create a fresh marker with the same position and color
+        item.marker = new maplibregl.Marker({
+            element: createMarker((index + 1).toString(), item.color)
+        })
+            .setLngLat(item.lngLat)
+            .addTo(state.map);
+    });
+}
+
+/**
+ * Redraw facility LAYERS (route lines) after a style switch.
+ *
+ * IMPORTANT — what survives a style switch and what doesn't:
+ *   - MapLibre MARKERS (DOM elements like the red pin and hospital icons)
+ *     are attached to the map container div, NOT to the style.
+ *     They survive style switches automatically — we must NOT call .addTo() again
+ *     or we will create invisible duplicate markers that can never be removed.
+ *   - MapLibre LAYERS / SOURCES (the route lines drawn with addSource/addLayer)
+ *     ARE part of the style and get wiped on every style switch.
+ *     We must re-add only these.
+ *
+ * So here we only rebuild the route line layer, leaving markers untouched.
+ */
+function restoreFacilityData() {
+    if (!state.lastFacilityData || !state.markers.facility) return;
+
+    const facilityType = document.getElementById('facility-type-select')?.value || 'hospital';
+
+    // Remove any leftover facility layers before we add new ones
+    removeFacilityLayers();
+
+    // Re-draw all facility result markers and their route lines
+    rebuildFacilityRouteLayers(state.lastFacilityData, facilityType);
+}
+
+/** Redraw service area polygon + road network after a style switch */
+function restoreServiceArea() {
+    if (!state.lastServiceData || !state.markers.service) return;
+    rebuildServiceAreaLayers(state.lastServiceData);
+}
+
+/**
+ * Helper: remove facility route layers from the map without touching markers.
+ * Called before re-adding layers to prevent "Source already exists" errors.
+ */
+function removeFacilityLayers() {
+    removeFacilityMarkers(); // Clear markers first so we don't leave orphaned lines without pins
+    ['facility-routes'].forEach(id => {
+        if (state.map.getLayer(id))  state.map.removeLayer(id);
+        if (state.map.getSource(id)) state.map.removeSource(id);
+    });
+}
+
+/**
+ * Re-draw ONLY the route lines for the current facility results.
+ * Used by restoreFacilityData() after a style switch.
+ * Markers are NOT touched here because they survive style switches on their own.
+ *
+ * @param {Object} data         - Saved API response (state.lastFacilityData)
+ * @param {string} facilityType - e.g. 'hospital'
+ */
+function rebuildFacilityRouteLayers(data, facilityType) {
+    // Collect all route line features from every facility result
+    const allRouteFeatures = [];
+    data.facilities.forEach((facility, index) => {
+        if (facility.route?.features) {
+            facility.route.features.forEach(f => {
+                allRouteFeatures.push({
+                    ...f,
+                    properties: {
+                        ...f.properties,
+                        facility_name:  facility.name,
+                        facility_rank:  index + 1,
+                        travel_minutes: facility.travel_minutes
+                    }
+                });
+            });
+        }
+    });
+
+    if (allRouteFeatures.length === 0) return;
+
+    const facilityColor = FACILITY_COLORS[facilityType] || '#6366f1';
+
+    state.map.addSource('facility-routes', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: allRouteFeatures }
+    });
+    state.map.addLayer({
+        id:     'facility-routes',
+        type:   'line',
+        source: 'facility-routes',
+        paint: {
+            'line-color':   facilityColor,
+            'line-width':   ['interpolate', ['linear'], ['get', 'facility_rank'], 1, 6, 5, 3],
+            'line-opacity': 0.8
         }
     });
 }
@@ -1184,23 +1273,6 @@ function fitToMultipleRoutes(routes) {
  * @param {Object} lngLat - Clicked coordinates { lng, lat }
  */
 function handleTSPClick(lngLat) {
-    // Prevent duplicate / too close clicks 
-    const MIN_DISTANCE_METERS = 100;
-
-    const isTooClose = state.markers.tsp.some(item => {
-        // Safe distance calculation without depending on turf or map.getDistance
-        const dx = item.lngLat.lng - lngLat.lng;
-        const dy = item.lngLat.lat - lngLat.lat;
-        const distanceMeters = Math.sqrt(dx*dx + dy*dy) * 111320; // rough conversion
-        return distanceMeters < MIN_DISTANCE_METERS;
-    });
-
-    if (isTooClose) {
-        showInfo('⚠️ This point is too close to an existing waypoint.<br>Please click somewhere else.');
-        return;
-    }
-
-    // Create new waypoint marker with a unique color and number
     const num   = state.markers.tsp.length + 1;         // Waypoint number (1-based)
     const color = TSP_COLORS[(num - 1) % TSP_COLORS.length]; // Pick a color from the palette
 
@@ -1214,7 +1286,7 @@ function handleTSPClick(lngLat) {
 
     if (state.markers.tsp.length < 3) {
         const remaining = 3 - state.markers.tsp.length;
-        showInfo(`✅ Point ${num} added. Need ${remaining} more (min 3)`);
+        showInfo(`✅ Point ${num} added (${color.toUpperCase()}). Need ${remaining} more (min 3)`);
     } else {
         showInfo(`✅ Point ${num} added. Auto-calculating optimized route in 2 seconds...`);
         // Small delay so the user can keep clicking before calculation starts
@@ -1226,7 +1298,8 @@ function handleTSPClick(lngLat) {
 
 /**
  * Request an optimized multi-point route from the backend.
- * Each segment is now correctly colored based on the STARTING waypoint's color.
+ * The result is drawn as separate colored segments — segment from point N to N+1
+ * uses the same color as point N's marker.
  */
 async function calculateTSP() {
     if (state.markers.tsp.length < 3) {
@@ -1237,45 +1310,81 @@ async function calculateTSP() {
     showInfo(`⏳ Solving TSP for ${state.markers.tsp.length} points...`);
     
     try {
-        // Extract coordinates from markers (in the order they were added)
+        // Extract coordinates from markers
         const points = state.markers.tsp.map(m => [m.lngLat.lng, m.lngLat.lat]);
         
-        // Send request to TSP API
+        // Send to the TSP API — it returns one big optimized route and the order of waypoints
         const data = await fetchWithTimeout(API_ENDPOINTS.tsp, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ points })
+            body: JSON.stringify({ points })
         });
         
         if (data.error) {
             throw new Error(data.error);
         }
 
-        // Clear any previous TSP layers before drawing new ones
-        clearTSPLayers();
+        // ---------------------------------------------------------------
+        // COLOR INDIVIDUAL SEGMENTS
+        // ---------------------------------------------------------------
+        // The API returns a single combined route but also a `segments` array
+        // where each entry is the sub-route between two consecutive waypoints.
+        //
+        // waypoint_order tells us the optimized visiting sequence, e.g. [0,2,1,3].
+        // Segment 0 is the road from waypoint_order[0] → waypoint_order[1], etc.
+        // We color each segment using the color of the ORIGIN waypoint in that leg.
 
-        // Save to the TSP-specific state slot so restoreTSPRoute() can find it.
-        // Also persist waypoint_order here so restore has it too.
-        state.lastTSPRouteData = {
-            segments:       data.segments,      // Array of per-leg FeatureCollections
-            waypoint_order: data.waypoint_order // e.g. [2, 0, 1, 2] (0-based, closes loop)
-        };
+        clearTSPLayers(); // Remove any previous TSP route layers
 
-        // Draw each leg segment with the color of its STARTING waypoint.
-        drawTSPSegments(data.segments, data.waypoint_order);
+        const order = data.waypoint_order || points.map((_, i) => i); // Fallback: original order
 
-        // Fit map to the first segment's bounds (rough but fast)
-        if (data.segments && data.segments.length > 0) {
-            fitToFeatures(data.segments[0]);
+        if (data.segments && Array.isArray(data.segments)) {
+            // API provided separate segments — draw each one in its own color
+            const segmentDataArray = [];
+
+            data.segments.forEach((segment, segIndex) => {
+                // The origin waypoint for this segment
+                const originWaypointIndex = order[segIndex] ?? segIndex;
+                const color = TSP_COLORS[originWaypointIndex % TSP_COLORS.length];
+
+                addRouteLayer(segment, color, 0.9, 6, `tsp-segment-${segIndex}`);
+                segmentDataArray.push(segment);
+            });
+
+            state.lastTSPRouteData = segmentDataArray; // Save for style-switch restoration
+
+        } else {
+            // API returned one combined route — split features into groups and color them
+            // Each feature in the FeatureCollection is roughly one road segment;
+            // we distribute them evenly across waypoint colors.
+            const features  = data.features || [];
+            const numLegs   = order.length - 1 || 1;
+            const chunkSize = Math.ceil(features.length / numLegs);
+            const segmentDataArray = [];
+
+            for (let legIndex = 0; legIndex < numLegs; legIndex++) {
+                const legFeatures = features.slice(legIndex * chunkSize, (legIndex + 1) * chunkSize);
+                if (legFeatures.length === 0) continue;
+
+                const originWaypointIndex = order[legIndex] ?? legIndex;
+                const color  = TSP_COLORS[originWaypointIndex % TSP_COLORS.length];
+                const legGeoJSON = { type: 'FeatureCollection', features: legFeatures };
+
+                addRouteLayer(legGeoJSON, color, 0.9, 6, `tsp-segment-${legIndex}`);
+                segmentDataArray.push(legGeoJSON);
+            }
+
+            state.lastTSPRouteData = segmentDataArray;
         }
 
-        // Show optimized order
-        const orderStr = data.waypoint_order.map((idx, i) => {
-                const color = TSP_COLORS[idx % TSP_COLORS.length];
-                const num = idx + 1;                    // convert 0-based to 1-based
-                return `<span style="color:${color}; font-weight:bold;">${num}</span>`;
-            })
-            .join(' <span style="color:#6b7280;">→</span> ');
+        // Zoom map to show the full route
+        fitToFeatures(data);
+
+        // Build a color-coded summary of the optimized visiting order
+        const orderStr = order.map((waypointIdx, legIdx) => {
+            const color  = TSP_COLORS[waypointIdx % TSP_COLORS.length];
+            return `<span style="color:${color};font-weight:bold">${waypointIdx + 1}</span>`;
+        }).join(' → ');
 
         showInfo(`
             ✅ <strong>TSP Optimized!</strong><br>
@@ -1288,33 +1397,6 @@ async function calculateTSP() {
     }
 }
 
- /**
- * Draw each TSP leg as a separately colored map layer.
- *
- * Color rule:
- *   Leg i goes from waypoint_order[i] → waypoint_order[i+1].
- *   The color of leg i = TSP_COLORS[ waypoint_order[i] % TSP_COLORS.length ].
- *   This matches the marker color at the starting point of that leg.
- *
- *
- * @param {Array}  segments       - Array of GeoJSON FeatureCollections (one per leg)
- * @param {Array}  waypoint_order - 0-based indices in visit order (length = segments+1,
- *                                  last entry closes the loop back to the first)
- */
-function drawTSPSegments(segments, waypoint_order) {
-    if (!segments || segments.length === 0) return;
-
-    segments.forEach((segmentData, i) => {
-        // waypoint_order[i] is the STARTING waypoint of this leg
-        const startWaypointIdx = waypoint_order ? waypoint_order[i] : i;
-        const color            = TSP_COLORS[startWaypointIdx % TSP_COLORS.length];
-        const layerId          = `tsp-segment-${i}`;
-
-        addRouteLayer(segmentData, color, 0.95, 6.5, layerId);
-    });
-}
-
-
 
 // ============================================================================
 // SECTION 11: NEAREST FACILITY MODE
@@ -1324,6 +1406,8 @@ function drawTSPSegments(segments, waypoint_order) {
 
 // A counter that increments with every new facility search.
 // If the API response comes back with an outdated counter value, we discard it.
+// This prevents a slow first search from overwriting the results of a faster second search.
+let _facilitySearchId = 0;
 
 /**
  * Handle map clicks in Facility mode.
@@ -1588,64 +1672,7 @@ function removeFacilityMarkers() {
         state.map.removeSource('facility-points');
     }
 }
-/**
- * Helper: remove facility route layers from the map without touching markers.
- * Called before re-adding layers to prevent "Source already exists" errors.
- */
-function removeFacilityLayers() {
-    removeFacilityMarkers(); // Clear markers first so we don't leave orphaned lines without pins
-    ['facility-routes'].forEach(id => {
-        if (state.map.getLayer(id))  state.map.removeLayer(id);
-        if (state.map.getSource(id)) state.map.removeSource(id);
-    });
-}
 
-/**
- * Re-draw ONLY the route lines for the current facility results.
- * Used by restoreFacilityData() after a style switch.
- * Markers are NOT touched here because they survive style switches on their own.
- *
- * @param {Object} data         - Saved API response (state.lastFacilityData)
- * @param {string} facilityType - e.g. 'hospital'
- */
-function rebuildFacilityRouteLayers(data, facilityType) {
-    // Collect all route line features from every facility result
-    const allRouteFeatures = [];
-    data.facilities.forEach((facility, index) => {
-        if (facility.route?.features) {
-            facility.route.features.forEach(f => {
-                allRouteFeatures.push({
-                    ...f,
-                    properties: {
-                        ...f.properties,
-                        facility_name:  facility.name,
-                        facility_rank:  index + 1,
-                        travel_minutes: facility.travel_minutes
-                    }
-                });
-            });
-        }
-    });
-
-    if (allRouteFeatures.length === 0) return;
-
-    const facilityColor = FACILITY_COLORS[facilityType] || '#6366f1';
-
-    state.map.addSource('facility-routes', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: allRouteFeatures }
-    });
-    state.map.addLayer({
-        id:     'facility-routes',
-        type:   'line',
-        source: 'facility-routes',
-        paint: {
-            'line-color':   facilityColor,
-            'line-width':   ['interpolate', ['linear'], ['get', 'facility_rank'], 1, 6, 5, 3],
-            'line-opacity': 0.8
-        }
-    });
-}
 
 // ============================================================================
 // SECTION 12: SERVICE AREA MODE
@@ -1664,7 +1691,6 @@ function handleServiceClick(lngLat) {
     // Remove old marker if exists
     if (state.markers.service) {
         state.markers.service.remove();
-        state.markers.service = null;
     }
     
     // Place service center marker
@@ -1690,7 +1716,11 @@ async function calculateServiceArea(lngLat) {
             `${API_ENDPOINTS.serviceArea}?lon=${lngLat.lng}&lat=${lngLat.lat}&minutes=${state.serviceMinutes}`
         );
         
-        if (data.error) throw new Error(data.error);
+        if (data.error) {
+            throw new Error(data.error);
+        }
+             
+        clearServiceArea(); // Remove old service area layers  
         
         state.lastServiceData = data; // Save for style-switch restoration
         
@@ -1726,56 +1756,357 @@ function rebuildServiceAreaLayers(data) {
     clearServiceArea();
 
     // Reachable road network
-    if (data.reachable_network) {
-        state.map.addSource('service-network', { 
-            type: 'geojson', 
-            data: data.reachable_network 
-        });
-        state.map.addLayer({ 
-            id: 'service-network', 
-            type: 'line', 
-            source: 'service-network', 
-            paint: { 
-                'line-color': '#f59e0b', 
-                'line-width': 3, 
-                'line-opacity': 0.6 
-            } 
-        });
-    }    
+    state.map.addSource('service-network', { 
+        type: 'geojson', 
+        data: data.reachable_network 
+    });
+    state.map.addLayer({ 
+        id: 'service-network', 
+        type: 'line', 
+        source: 'service-network', 
+        paint: { 
+            'line-color': '#f59e0b', 
+            'line-width': 3, 
+            'line-opacity': 0.6 
+        } 
+    });
 
     // Red polygon fill (the catchment area)
-    if (data.service_area) {
-        state.map.addSource('service-hull', { 
-            type: 'geojson', 
-            data: data.service_area 
-        });
-        state.map.addLayer({ 
-            id: 'service-hull', 
-            type: 'fill', 
-            source: 'service-hull', 
-            paint: { 
-                'fill-color': '#dc2626', 
-                'fill-opacity': 0.15 
-            } 
-        });
+    state.map.addSource('service-hull', { 
+        type: 'geojson', 
+        data: data.service_area 
+    });
+    state.map.addLayer({ 
+        id: 'service-hull', 
+        type: 'fill', 
+        source: 'service-hull', 
+        paint: { 
+            'fill-color': '#dc2626', 
+            'fill-opacity': 0.15 
+        } 
+    });
 
-        // Red dashed border around the polygon
-        state.map.addLayer({ 
-            id: 'service-border', 
-            type: 'line', 
-            source: 'service-hull', 
-            paint: { 
-                'line-color': '#dc2626', 
-                'line-width': 4, 
-                'line-dasharray': [3, 2], 
-                'line-opacity': 0.8 
-            } 
-        });
-    }    
+    // Red dashed border around the polygon
+    state.map.addLayer({ 
+        id: 'service-border', 
+        type: 'line', 
+        source: 'service-hull', 
+        paint: { 
+            'line-color': '#dc2626', 
+            'line-width': 4, 
+            'line-dasharray': [3, 2], 
+            'line-opacity': 0.8 
+        } 
+    });
 }
 
 // ============================================================================
-// SECTION 13: UTILITY FUNCTIONS
+// SECTION 13: SEARCH FUNCTIONALITY (Elasticsearch)
+// ============================================================================
+// Search for building units or floors by name/address.
+// Results appear in the sidebar; clicking one zooms to it in 3D and highlights it.
+
+/**
+ * Execute a search against the Elasticsearch index.
+ * Uses "multi_match" so it searches several fields at once,
+ * and "fuzziness: AUTO" to tolerate minor typos.
+ */
+async function searchUnits() {
+    const queryText = document.getElementById('searchInput').value.trim();
+    const resultsDiv = document.getElementById('results');
+
+    // Validate input
+    if (!queryText) {
+        resultsDiv.innerHTML = '<div class="no-results">Please enter a search term</div>';
+        return;
+    }
+
+    resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
+    clearHighlight();
+
+    // Choose the right index and fields based on the selected dataset radio button
+    const index = currentDataset === 'units' ? 'building_units' : 'buildings_vertical';
+    
+    // Define which fields to search (with boost values)
+    const fields = currentDataset === 'units'
+        ? ['properties.UNIT_ID', 'properties.NAME^2', 'properties.NAME_LONG', 'properties.UnitAddres', 'properties.LabelNames']
+        : ['properties.UnitAddress^3', 'properties.ShortAddress^1.8', 'properties.fkFloorID^1.5', 'properties.FloorUsage'];
+
+    // Build Elasticsearch query
+    const esQuery = { 
+        query: { 
+            multi_match: { 
+                query: queryText, 
+                fields, 
+                type: 'best_fields', 
+                fuzziness: 'AUTO'  // Tolerate up to 2 character differences
+            } 
+        }, 
+        size: 20 // Return at most 20 results
+    };
+
+    try {
+        // Execute search
+        const response = await fetch(`${ES_URL}/${index}/_search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(esQuery)
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        resultsDiv.innerHTML = '';
+
+        // Check for results
+        if (data.hits.hits.length === 0) {
+            resultsDiv.innerHTML = '<div class="no-results">No results found.</div>';
+            return;
+        }
+
+        // Render each result as a clickable list item
+        data.hits.hits.forEach(hit => {
+            const feature = hit._source;
+            const props = feature.properties || feature; // Support both new (nested) and old (flat) structures
+            const item = document.createElement('div');
+            item.className = 'result-item';
+
+            // Format based on dataset type
+            if (currentDataset === 'units') {
+                item.innerHTML = `
+                    <strong>${props.UNIT_ID || 'N/A'}</strong><br>
+                    ${props.LabelNames || 'Unnamed'} (${props.UnitAddres || 'No address'})<br>
+                    <small>Floor Height: ${props.Base !== undefined ? props.Base.toFixed(2) + 'm' : 'N/A'} | Type: ${props.USE_TYPE || 'N/A'}</small>
+                `;
+            } else {
+                item.innerHTML = `
+                    <strong>${props.UnitAddress || props.fkFloorID || '—'}</strong><br>
+                    Floor ${props.FloorNumber ?? '—'} – ${props.FloorUsage || '—'}<br>
+                    <small>Address: ${props.UnitAddress || props.ShortAddress || 'No address'} | Building: ${props.BuildingHeight ? props.BuildingHeight.toFixed(1) + 'm' : '—'}</small>
+                `;
+            }
+
+            // Add click handler to zoom to feature
+            item.onclick = () => zoomToFeature(feature, item); // Pass original feature
+            resultsDiv.appendChild(item);
+        });
+
+    } catch (err) {
+        console.error('Search error:', err);
+        resultsDiv.innerHTML = `<div class="error">Error: ${err.message}<br><small>Check console for details</small></div>`;
+    }
+}
+
+/**
+ * Calculate where to place the info popup relative to a feature's bounding box.
+ * Positions it slightly to the right of and above the feature's center.
+ *
+ * @param {Object} bounds - MapLibre LngLatBounds of the feature
+ * @returns {Array} [lng, lat] for the popup anchor
+ */
+function getPopupAnchorPosition(bounds) {
+    const ne = bounds.getNorthEast();
+    const sw = bounds.getSouthWest();
+    // Place the popup 30% to the right and 65% up from the bottom of the bounding box
+    return [
+        ne.lng + (ne.lng - sw.lng) * 0.3,  // 30% to the right
+        sw.lat + (ne.lat - sw.lat) * 0.65  // 65% up from bottom
+    ];
+}
+
+/**
+ * Zoom to a search result, switch to 3D BDF view, and highlight the feature.
+ *
+ * @param {Object} feature      - The Elasticsearch document (_source)
+ * @param {HTMLElement} clickedElement - The result list item that was clicked
+ */
+async function zoomToFeature(feature, clickedElement) {
+    if (!state.map) {
+        console.warn('Map not ready');
+        return;
+    }
+
+    // Clear previous highlights and mark new selection
+    clearHighlight();
+    clickedElement.classList.add('active');
+
+    // Support both old flat and new nested structure
+    const props = feature.properties || feature;
+    const geometry = feature.geometry || (feature.properties && feature.properties.geometry);
+    // Validate geometry
+    if (!feature.geometry) {
+        alert('No geometry available for this feature.');
+        return;
+    }
+
+    // Calculate feature bounds
+    const bounds = new maplibregl.LngLatBounds();
+    const flattenCoords = (arr) => {
+        if (typeof arr[0] === 'number') {
+            bounds.extend([arr[0], arr[1]]);
+        } else {
+            arr.forEach(flattenCoords);
+        }
+    };
+    flattenCoords(geometry.coordinates);
+    
+    if (bounds.isEmpty()) {
+        alert('No valid geometry found.');
+        return;
+    }
+
+    // Calculate popup position
+    const popupPosition = getPopupAnchorPosition(bounds);
+
+    // Build the popup HTML with the feature's attributes
+    let popupHTML = `
+        <div style="max-width:280px;font-size:14px;line-height:1.6;">
+            <strong style="font-size:16px;color:#1f2937;">
+                ${props.NAME || props.FloorUsage || props.UnitAddress || 'Feature'}
+            </strong><br>
+    `;
+
+    if (currentDataset === 'units') {
+        popupHTML += `
+            <strong>Unit ID:</strong> ${props.UNIT_ID || '—'}<br>
+            <strong>Address:</strong> ${props.UnitAddres || 'N/A'}<br>
+            <strong>Floor Height:</strong> ${props.Base !== undefined ? props.Base.toFixed(2) + 'm' : 'N/A'}<br>
+            <strong>Height:</strong> ${props.HEIGHT !== undefined ? props.HEIGHT.toFixed(2) + 'm' : 'N/A'}<br>
+            <strong>Type:</strong> ${props.USE_TYPE || 'N/A'}
+        `;
+    } else {
+        popupHTML += `
+            <strong>ID:</strong> ${props.fkFloorID || props.UnitAddress || '—'}<br>
+            <strong>Address:</strong> ${props.UnitAddress || props.ShortAddress || 'N/A'}<br>
+            <strong>Floor:</strong> ${props.FloorNumber ?? '—'}<br>
+            <strong>Usage:</strong> ${props.FloorUsage || '—'}<br>
+            <strong>Total Floors:</strong> ${props.NoofFloors || '—'}<br>
+            <strong>Building Height:</strong> ${props.BuildingHeight ? props.BuildingHeight.toFixed(1) + 'm' : '—'}
+        `;
+    }
+    popupHTML += '</div>';
+
+    // Function to add highlight and animate camera
+    const afterStyleLoad = () => {
+        addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML);
+    };
+
+    // Switch to 3D BDF style if not already active
+    const bdfStyle = STYLES.find(s => s.id === 'bdf-style');
+    if (currentStyleId !== 'bdf-style') {
+        state.map.setStyle(bdfStyle.url);
+        currentStyleId = 'bdf-style';
+        state.map.once('idle', afterStyleLoad);
+    } else {
+        afterStyleLoad();
+    }
+}
+
+/**
+ * Add a 3D orange extrusion highlight and animate the camera to the feature.
+ *
+ * @param {Object} feature        - Elasticsearch document
+ * @param {Object} bounds         - LngLatBounds of the feature
+ * @param {Array}  popupPosition  - [lng, lat] for the popup
+ * @param {string} popupHTML      - HTML content for the popup
+ */
+function addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML) {
+    // Get layer ordering
+    if (!state.map) return;
+
+    const props = feature.properties || feature;
+    const geometry = feature.geometry || (feature.properties && feature.properties.geometry);
+    if (!geometry) {
+        console.warn('No geometry found for highlighting');
+        return;
+    }
+    const layers = state.map.getStyle().layers || [];
+    const beforeId = layers.length > 0 ? layers[layers.length - 1].id : undefined;
+    
+    // Create a safe CSS/MapLibre ID from the feature's identifier
+    const safeId = (props.UNIT_ID || props.fkFloorID || props.UnitAddress || 'feat')
+        .replace(/[^a-z0-9]/gi, '-');
+    const id = `highlight-${safeId}`;
+
+    // Track for cleanup
+    currentHighlightIds.push(id);
+    
+    // Add GeoJSON source for highlighting
+    state.map.addSource(id, { 
+        type: 'geojson', 
+        data: { 
+            type: 'Feature', 
+            geometry: geometry,
+            properties: { ...props }
+        } 
+    });
+
+    // Calculate extrusion heights based on dataset
+    let extrusionBase = 0;
+    let extrusionHeight = 4;
+    if (currentDataset === 'units') {
+        // Units: use Base and HEIGHT properties
+        extrusionBase = props.Base || 0;
+        extrusionHeight = extrusionBase + (props.HEIGHT || 4.25);
+    } else {
+        // Floors: calculate from building height and floor number
+        const floorH = (props.BuildingHeight || 0) / (props.NoofFloors || 1);
+        extrusionBase = floorH * (props.FloorNumber || 0);
+        extrusionHeight = extrusionBase + floorH;
+    }
+
+    // Add the 3D extruded polygon in orange
+    state.map.addLayer({
+        id, 
+        type: 'fill-extrusion', 
+        source: id,
+        paint: { 
+            'fill-extrusion-color': '#ff5c00',      // Orange highlight
+            'fill-extrusion-opacity': 0.95, 
+            'fill-extrusion-height': ['+', extrusionHeight, 1],  // Slightly above
+            'fill-extrusion-base': extrusionBase 
+        }
+    }, beforeId);
+
+    // Animate camera to feature
+    state.map.fitBounds(bounds, { 
+        padding: { 
+            top: 100, 
+            bottom: 100, 
+            left: 420,  // Extra padding for search panel
+            right: 100 
+        }, 
+        pitch: 60,          // Tilted view
+        bearing: -18,       // Slight rotation
+        minZoom: 16, 
+        maxZoom: 19.5, 
+        duration: 1600, 
+        essential: true 
+    });
+
+    // Show the popup 0.8 seconds after the camera animation starts
+    setTimeout(() => {
+        currentPopup = new maplibregl.Popup({ 
+            offset: [15, 0], 
+            closeButton: true, 
+            className: 'unit-popup', 
+            maxWidth: '300px', 
+            anchor: 'left' 
+        })
+            .setLngLat(popupPosition)
+            .setHTML(popupHTML)
+            .addTo(state.map);
+        
+        currentPopup.on('close', () => {
+            currentPopup = null;
+        });
+    }, 800);
+}
+
+// ============================================================================
+// SECTION 14: UTILITY FUNCTIONS
 // ============================================================================
 // Small reusable helpers used throughout the application.
 
@@ -1931,91 +2262,6 @@ function fitToFeatures(data) {
 }
 
 // ============================================================================
-// SECTION 14: RESTORE FUNCTIONS
-// ============================================================================
-// Each function redraws one mode's data after a style switch.
-// They read from the saved state (currentRouteData, lastFacilityData, etc.)
-// so no new API calls are needed.
-
-/** Redraw A→B route(s) after a style switch */
-function restoreRouteLayers() {
-    if (!Array.isArray(state.currentRouteData)) return;
-    state.currentRouteData.forEach((route, i) => {
-        addRouteLayer(route, getRouteColor(i), i === 0 ? 0.9 : 0.6, i === 0 ? 7 : 5, `route-${i}`);
-    });
-}
-
-/**
- * Redraw TSP route segments + re-create waypoint markers after map style change.
- * Each segment keeps its original color based on the starting waypoint.
- */
-function restoreTSPRoute() {
-    if (!state.lastTSPRouteData) return;
-
-    const { segments, waypoint_order } = state.lastTSPRouteData;
-
-    // Aggressive cleanup of old TSP layers (prevents "source already exists" errors)
-    for (let i = 0; i < 50; i++) {
-        const id = `tsp-segment-${i}`;
-        if (state.map.getLayer(id)) state.map.removeLayer(id);
-        if (state.map.getSource(id)) state.map.removeSource(id);
-    }
- 
-    // MapLibre can fire 'idle' before map.isStyleLoaded() is true in some
-    // versions (particularly when switching between raster/vector styles).
-    // addRouteLayer → addSource/addLayer will throw "style not loaded" and
-    // the error is caught silently by the outer try/catch in switchMapStyle,
-    // leaving the map blank.  Guard with isStyleLoaded() and retry on the
-    // next styledata event if needed.
-
-    if (!state.map.isStyleLoaded()) {
-        state.map.once('styledata', () => restoreTSPRoute());
-        return;
-    }
- 
-    // Re-draw all leg segments with the correct colors.
-    drawTSPSegments(segments, waypoint_order);
- 
-    // NOTE: We intentionally do NOT recreate the numbered waypoint markers here.
-    // MapLibre Marker objects are DOM elements attached to the map container —
-    // they are NOT part of the style and therefore survive style switches intact.
-    // Calling addTo() again would create a second invisible marker at the same
-    // position that clearAll() can never remove .
-}
-
-/**
- * Redraw facility LAYERS (route lines) after a style switch.
- *
- * IMPORTANT — what survives a style switch and what doesn't:
- *   - MapLibre MARKERS (DOM elements like the red pin and hospital icons)
- *     are attached to the map container div, NOT to the style.
- *     They survive style switches automatically — we must NOT call .addTo() again
- *     or we will create invisible duplicate markers that can never be removed.
- *   - MapLibre LAYERS / SOURCES (the route lines drawn with addSource/addLayer)
- *     ARE part of the style and get wiped on every style switch.
- *     We must re-add only these.
- *
- * So here we only rebuild the route line layer, leaving markers untouched.
- */
-function restoreFacilityData() {
-    if (!state.lastFacilityData || !state.markers.facility) return;
-
-    const facilityType = document.getElementById('facility-type-select')?.value || 'hospital';
-
-    // Remove any leftover facility layers before we add new ones
-    removeFacilityLayers();
-
-    // Re-draw all facility result markers and their route lines
-    rebuildFacilityRouteLayers(state.lastFacilityData, facilityType);
-}
-
-/** Redraw service area polygon + road network after a style switch */
-function restoreServiceArea() {
-    if (!state.lastServiceData || !state.markers.service) return;
-    rebuildServiceAreaLayers(state.lastServiceData);
-}
-
-// ============================================================================
 // SECTION 15: CLEANUP FUNCTIONS
 // ============================================================================
 // Functions to remove specific layers/markers from the map and reset state.
@@ -2075,26 +2321,13 @@ function clearFacilityData() {
 }
 
 /**
- * Clear service area visualization - ALWAYS remove layers BEFORE sources
+ * Clear service area visualization
+ * Removes service area polygon and network layers
  */
 function clearServiceArea() {
-    if (!state.map) return;
-    
-    const layerIds = ['service-border', 'service-hull', 'service-network'];
-    const sourceIds = ['service-hull', 'service-network'];
-
-    // 1. Remove layers first (in reverse dependency order)
-    layerIds.forEach(id => {
-        if (state.map.getLayer(id)) {
-            state.map.removeLayer(id);
-        }
-    });
-
-    // 2. Then remove sources
-    sourceIds.forEach(id => {
-        if (state.map.getSource(id)) {
-            state.map.removeSource(id);
-        }
+    ['service-network', 'service-hull', 'service-border'].forEach(id => {
+        if (state.map.getLayer(id)) state.map.removeLayer(id);
+        if (state.map.getSource(id)) state.map.removeSource(id);
     });
 }
 
@@ -2102,10 +2335,11 @@ function clearServiceArea() {
  * Remove 3D search result highlights and close any open popup.
  */
 function clearHighlight() {
+    if (!state.map) return;
     // Remove all highlight layers
     currentHighlightIds.forEach(id => {
-        if (state.map?.getLayer(id)) state.map.removeLayer(id);
-        if (state.map?.getSource(id)) state.map.removeSource(id);
+        if (state.map.getLayer(id)) state.map.removeLayer(id);
+        if (state.map.getSource(id)) state.map.removeSource(id);
     });
     currentHighlightIds = [];
 
@@ -2159,299 +2393,7 @@ function clearAll() {
 }
 
 // ============================================================================
-// SECTION 16: SEARCH FUNCTIONALITY (Elasticsearch)
-// ============================================================================
-// Search for building units or floors by name/address.
-// Results appear in the sidebar; clicking one zooms to it in 3D and highlights it.
-
-/**
- * Execute a search against the Elasticsearch index.
- * Uses "multi_match" so it searches several fields at once,
- * and "fuzziness: AUTO" to tolerate minor typos.
- */
-async function searchUnits() {
-    const queryText = document.getElementById('searchInput').value.trim();
-    const resultsDiv = document.getElementById('results');
-
-    // Validate input
-    if (!queryText) {
-        resultsDiv.innerHTML = '<div class="no-results">Please enter a search term</div>';
-        return;
-    }
-
-    resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
-    clearHighlight();
-
-    // Choose the right index and fields based on the selected dataset radio button
-    const index = currentDataset === 'units' ? 'building_units' : 'buildings_vertical';
-    
-    // Define which fields to search (with boost values)
-    const fields = currentDataset === 'units'
-        ? ['UNIT_ID', 'NAME^2', 'NAME_LONG', 'UnitAddres', 'LabelNames']
-        : ['UnitAddress^3', 'ShortAddress^1.8', 'fkFloorID^1.5', 'FloorUsage'];
-
-    // Build Elasticsearch query
-    const esQuery = { 
-        query: { 
-            multi_match: { 
-                query: queryText, 
-                fields, 
-                type: 'best_fields', 
-                fuzziness: 'AUTO'  // Tolerate up to 2 character differences
-            } 
-        }, 
-        size: 20 // Return at most 20 results
-    };
-
-    try {
-        // Execute search
-        const response = await fetch(`${ES_URL}/${index}/_search`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(esQuery)
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        resultsDiv.innerHTML = '';
-
-        // Check for results
-        if (data.hits.hits.length === 0) {
-            resultsDiv.innerHTML = '<div class="no-results">No results found.</div>';
-            return;
-        }
-
-        // Render each result as a clickable list item
-        data.hits.hits.forEach(hit => {
-            const doc = hit._source;
-            const item = document.createElement('div');
-            item.className = 'result-item';
-
-            // Format based on dataset type
-            if (currentDataset === 'units') {
-                item.innerHTML = `
-                    <strong>${doc.UNIT_ID || 'N/A'}</strong><br>
-                    ${doc.LabelNames || 'Unnamed'} (${doc.UnitAddres || 'No address'})<br>
-                    <small>Floor Height: ${doc.Base !== undefined ? doc.Base.toFixed(2) + 'm' : 'N/A'} | Type: ${doc.USE_TYPE || 'N/A'}</small>
-                `;
-            } else {
-                item.innerHTML = `
-                    <strong>${doc.UnitAddress || doc.fkFloorID || '—'}</strong><br>
-                    Floor ${doc.FloorNumber ?? '—'} – ${doc.FloorUsage || '—'}<br>
-                    <small>Address: ${doc.UnitAddress || doc.ShortAddress || 'No address'} | Building: ${doc.BuildingHeight ? doc.BuildingHeight.toFixed(1) + 'm' : '—'}</small>
-                `;
-            }
-
-            // Add click handler to zoom to feature
-            item.onclick = () => zoomToFeature(doc, item);
-            resultsDiv.appendChild(item);
-        });
-
-    } catch (err) {
-        console.error('Search error:', err);
-        resultsDiv.innerHTML = `<div class="error">Error: ${err.message}<br><small>Check console for details</small></div>`;
-    }
-}
-
-/**
- * Calculate where to place the info popup relative to a feature's bounding box.
- * Positions it slightly to the right of and above the feature's center.
- *
- * @param {Object} bounds - MapLibre LngLatBounds of the feature
- * @returns {Array} [lng, lat] for the popup anchor
- */
-function getPopupAnchorPosition(bounds) {
-    const ne = bounds.getNorthEast();
-    const sw = bounds.getSouthWest();
-    // Place the popup 30% to the right and 65% up from the bottom of the bounding box
-    return [
-        ne.lng + (ne.lng - sw.lng) * 0.3,  // 30% to the right
-        sw.lat + (ne.lat - sw.lat) * 0.65  // 65% up from bottom
-    ];
-}
-
-/**
- * Zoom to a search result, switch to 3D BDF view, and highlight the feature.
- *
- * @param {Object} feature      - The Elasticsearch document (_source)
- * @param {HTMLElement} clickedElement - The result list item that was clicked
- */
-async function zoomToFeature(feature, clickedElement) {
-    if (!state.map) {
-        console.warn('Map not ready');
-        return;
-    }
-
-    // Clear previous highlights and mark new selection
-    clearHighlight();
-    clickedElement.classList.add('active');
-
-    // Validate geometry
-    if (!feature.geometry) {
-        alert('No geometry available for this feature.');
-        return;
-    }
-
-    // Calculate feature bounds
-    const bounds = new maplibregl.LngLatBounds();
-    const flattenCoords = (arr) => {
-        if (typeof arr[0] === 'number') {
-            bounds.extend([arr[0], arr[1]]);
-        } else {
-            arr.forEach(flattenCoords);
-        }
-    };
-    flattenCoords(feature.geometry.coordinates);
-    
-    if (bounds.isEmpty()) {
-        alert('No valid geometry found.');
-        return;
-    }
-
-    // Calculate popup position
-    const popupPosition = getPopupAnchorPosition(bounds);
-
-    // Build the popup HTML with the feature's attributes
-    let popupHTML = `
-        <div style="max-width:280px;font-size:14px;line-height:1.6;">
-            <strong style="font-size:16px;color:#1f2937;">
-                ${feature.NAME || feature.FloorUsage || feature.UnitAddress || 'Feature'}
-            </strong><br>
-    `;
-
-    if (currentDataset === 'units') {
-        popupHTML += `
-            <strong>Unit ID:</strong> ${feature.UNIT_ID || '—'}<br>
-            <strong>Address:</strong> ${feature.UnitAddres || 'N/A'}<br>
-            <strong>Floor:</strong> ${feature.Base !== undefined ? feature.Base.toFixed(2) + 'm' : 'N/A'}<br>
-            <strong>Height:</strong> ${feature.HEIGHT !== undefined ? feature.HEIGHT.toFixed(2) + 'm' : 'N/A'}<br>
-            <strong>Type:</strong> ${feature.USE_TYPE || 'N/A'}
-        `;
-    } else {
-        popupHTML += `
-            <strong>ID:</strong> ${feature.fkFloorID || feature.UnitAddress || '—'}<br>
-            <strong>Address:</strong> ${feature.UnitAddress || feature.ShortAddress || 'N/A'}<br>
-            <strong>Floor:</strong> ${feature.FloorNumber ?? '—'}<br>
-            <strong>Usage:</strong> ${feature.FloorUsage || '—'}<br>
-            <strong>Total Floors:</strong> ${feature.NoofFloors || '—'}<br>
-            <strong>Building Height:</strong> ${feature.BuildingHeight ? feature.BuildingHeight.toFixed(1) + 'm' : '—'}
-        `;
-    }
-    popupHTML += '</div>';
-
-    // Function to add highlight and animate camera
-    const afterStyleLoad = () => {
-        addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML);
-    };
-
-    // Switch to 3D BDF style if not already active
-    const bdfStyle = STYLES.find(s => s.id === 'bdf-style');
-    if (currentStyleId !== 'bdf-style') {
-        state.map.setStyle(bdfStyle.url);
-        currentStyleId = 'bdf-style';
-        state.map.once('idle', afterStyleLoad);
-    } else {
-        afterStyleLoad();
-    }
-}
-
-/**
- * Add a 3D orange extrusion highlight and animate the camera to the feature.
- *
- * @param {Object} feature        - Elasticsearch document
- * @param {Object} bounds         - LngLatBounds of the feature
- * @param {Array}  popupPosition  - [lng, lat] for the popup
- * @param {string} popupHTML      - HTML content for the popup
- */
-function addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML) {
-    // Get layer ordering
-    const layers = state.map.getStyle().layers || [];
-    const beforeId = layers.length > 0 ? layers[layers.length - 1].id : undefined;
-    
-    // Create a safe CSS/MapLibre ID from the feature's identifier
-    const safeId = (feature.UNIT_ID || feature.fkFloorID || feature.UnitAddress || 'feat')
-        .replace(/[^a-z0-9]/gi, '-');
-    const id = `highlight-${safeId}`;
-
-    // Track for cleanup
-    currentHighlightIds.push(id);
-    
-    // Add the feature as a GeoJSON source
-    state.map.addSource(id, { 
-        type: 'geojson', 
-        data: { 
-            type: 'Feature', 
-            geometry: feature.geometry, 
-            properties: { ...feature } 
-        } 
-    });
-
-    // Calculate extrusion heights based on dataset
-    let extrusionBase, extrusionHeight;
-    if (currentDataset === 'units') {
-        // Units: use Base and HEIGHT properties
-        extrusionBase = feature.Base || 0;
-        extrusionHeight = extrusionBase + (feature.HEIGHT || 4.25);
-    } else {
-        // Floors: calculate from building height and floor number
-        const floorH = (feature.BuildingHeight || 0) / (feature.NoofFloors || 1);
-        extrusionBase = floorH * (feature.FloorNumber || 0);
-        extrusionHeight = extrusionBase + floorH;
-    }
-
-    // Add the 3D extruded polygon in orange
-    state.map.addLayer({
-        id, 
-        type: 'fill-extrusion', 
-        source: id,
-        paint: { 
-            'fill-extrusion-color': '#ff5c00',      // Orange highlight
-            'fill-extrusion-opacity': 0.95, 
-            'fill-extrusion-height': ['+', extrusionHeight, 1],  // Slightly above
-            'fill-extrusion-base': extrusionBase 
-        }
-    }, beforeId);
-
-    // Animate camera to feature
-    state.map.fitBounds(bounds, { 
-        padding: { 
-            top: 100, 
-            bottom: 100, 
-            left: 420,  // Extra padding for search panel
-            right: 100 
-        }, 
-        pitch: 60,          // Tilted view
-        bearing: -18,       // Slight rotation
-        minZoom: 16, 
-        maxZoom: 19.5, 
-        duration: 1600, 
-        essential: true 
-    });
-
-    // Show the popup 0.8 seconds after the camera animation starts
-    setTimeout(() => {
-        currentPopup = new maplibregl.Popup({ 
-            offset: [15, 0], 
-            closeButton: true, 
-            className: 'unit-popup', 
-            maxWidth: '300px', 
-            anchor: 'left' 
-        })
-            .setLngLat(popupPosition)
-            .setHTML(popupHTML)
-            .addTo(state.map);
-        
-        currentPopup.on('close', () => {
-            currentPopup = null;
-        });
-    }, 800);
-}
-
-// ============================================================================
-// SECTION 17: APPLICATION INITIALIZATION
+// SECTION 16: APPLICATION INITIALIZATION
 // ============================================================================
 // Start the application when page loads
 

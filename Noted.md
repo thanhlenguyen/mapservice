@@ -332,3 +332,83 @@ kubectl apply -f all-manifests.yaml
 # 7. Watch pods come up
 kubectl get pods -n map-service -w
 ```
+
+## ElasticSearch and Kibana cannot install on VM because of limatation resources
+
+### Use a Reverse SSH Tunnel (Secure and No Public Exposure)
+This forwards a port on the VM to your local ES without exposing ES to the internet. Initiate the tunnel from your local machine (where ES runs).
+
+1. Set Up the Tunnel:
+From your local machine, run:textssh -f -N -R 9201:localhost:9200 lent@10.50.29.9
+-f: Runs in background.
+-N: No remote command.
+-R 9201:localhost:9200: Forwards port 9201 on the VM to port 9200 on your local machine.
+
+Full recommended version (safer & more reliable):
+```bash
+ssh -f -N -R 9201:localhost:9200 -o ServerAliveInterval=60 lent@10.50.29.9
+```
+The extra -o ServerAliveInterval=60 helps keep the tunnel alive longer if your network is flaky.
+
+If you use an SSH key instead of password (recommended):
+```Bash
+ssh -f -N -R 9201:localhost:9200 -i ~/.ssh/your_key lent@10.50.29.9
+```
+2. Update Your App's Script on the VM:
+In your app's configuration or connection script (e.g., in code or env vars), change the ES host from localhost:9200 to localhost:9201 (the forwarded port).
+- Example in Python (using elasticsearch-py):textfrom elasticsearch import Elasticsearch
+es = Elasticsearch(['http://localhost:9201'])  # Add auth if needed: hosts=[...], http_auth=('user', 'pass')
+- Or in a config file/ENV: Set ES_URL='http://localhost:9201'
+
+### Use ES on Non-prod environment
+
+1. Configure Nginx of frontend
+```bash
+ # =========================
+    # Elasticsearch Proxy (secured + CORS)
+    # =========================
+    location /es/ {
+        # Handle preflight OPTIONS request (CORS)
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' 'https://non-prd-elastic.address.gov.sa' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization,Content-Type,Accept,Origin,X-Requested-With' always;
+            add_header 'Access-Control-Max-Age' 86400 always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            return 204;
+        }
+
+        # Forward to Elasticsearch with Basic Auth
+        proxy_pass https://non-prd-elastic.address.gov.sa/;
+
+        # Important headers for Elasticsearch
+        proxy_http_version 1.1;
+        proxy_set_header Host              non-prd-elastic.address.gov.sa;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection        "";
+
+        # Inject Basic Authentication (credentials stay server-side)
+        proxy_set_header Authorization "Basic bGVudDI6O11NTSQ2QkN6Q0I3NmQ4dks=";   # Base64 of "lent2:bGVudD"
+
+        # CORS response headers for actual requests
+        add_header 'Access-Control-Allow-Origin' 'https://map-tiles-frontend.address.gov.sa' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Authorization,Content-Type,Accept,Origin,X-Requested-With' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+
+        # Do not cache search requests
+        proxy_cache off;
+        expires off;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+
+        # Timeouts (adjust if needed)
+        proxy_connect_timeout 10s;
+        proxy_send_timeout    30s;
+        proxy_read_timeout    30s;
+    }
+
+```
+2. Encoding username:password Into Base64 on Ubuntu:
+`echo -n 'lent2:;]MM$6BCzCB76d8vK'  | base64`
