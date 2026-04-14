@@ -23,8 +23,10 @@ body {
 /* ==========================================================================
    MAP
    ========================================================================== */
+
 #map {
     position: absolute;
+    /* inset: 0; shorthand for top/right/bottom/left: 0 */
     top: 0;
     bottom: 0;
     left: 0;
@@ -34,35 +36,41 @@ body {
     overflow: visible;
 }
 
-/* Cursor styles for info pointer mode */
-#map.info-pointer-active {
-    cursor: default;
-}
-
 /* ==========================================================================
-   FLOATING CONTROL PANELS
+   CONTROL PANEL
+   --------------------------------------------------------------------------
+   Base class provides shared visual chrome (bg, border, shadow, radius).
+   Positioning is NOT set here — each variant (.header, .feature-info-panel,
+   .search-panel) sets its own position so no child needs to fight the base
+   with !important overrides.
    ========================================================================== */
+
 .control-panel {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 10;
     background: white;
     border-radius: 0.875rem;
     border: 1px solid #e0f2fe;
     box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.15);
     padding: 1rem 1.5rem;
+}
+
+/* --- Header variant (top-center floating pill) --- */
+.control-panel.header {
+    position: absolute;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
     min-width: 340px;
     max-width: 95vw;
-}
-
-/* Header panel (top-center) */
-.control-panel.header {
-    top: 1rem;
-    z-index: 20;
     margin-bottom: 0.5rem;
+    /* Ensure all children (buttons, inputs) stay clickable over the map */
+    pointer-events: auto;
+}
+.control-panel.header * { 
+    pointer-events: auto; 
 }
 
+/* --- Header content layout --- */
 .header-content {
     display: flex;
     flex-direction: column;
@@ -78,7 +86,7 @@ body {
     white-space: nowrap;
 }
 
-/* Mode switcher buttons */
+/* Mode switcher  */
 .mode-switcher {
     display: flex;
     flex-wrap: wrap;
@@ -121,9 +129,7 @@ body {
 #mode-facility.active { background: #059324; }  /* green */
 #mode-service.active   { background: #ef4444; }  /* red */
 
-/* ==========================================================================
-   ROUTE OPTIMIZATION OPTIONS
-   ========================================================================== */
+/* --- Route optimization options --- */
 .route-option-label {
     display: block;
     font-size: 0.85rem;
@@ -199,9 +205,7 @@ body {
 .highlight.start { color: #16a34a; }
 .highlight.end   { color: #dc2626; }
 
-/* ==========================================================================
-   FACILITY SELECTOR
-   ========================================================================== */
+/* --- Facility type selector --- */
 #facility-selector {
     display: flex;
     align-items: center;
@@ -240,9 +244,43 @@ body {
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
-/* ==========================================================================
-   MODE-SPECIFIC CONTROLS (Sliders inside main panel)
-   ========================================================================== */
+/* Facility markers */
+.facility-marker {
+    width: 48px;
+    height: 48px;
+    background: #6366f1;           /* default color - will be overridden */
+    border: 3px solid white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    box-sizing: border-box;
+    transform-origin: center center;  /* helps with scaling/positioning */
+}
+
+.facility-marker .rank-badge {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 24px;
+    height: 24px;
+    background: white;
+    border: 2px solid #6366f1;     /* default color - will be overridden */
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: #6366f1;                /* default color */
+    box-sizing: border-box;
+    pointer-events: none;          /* don't interfere with marker hover */
+}
+
+/* --- Sliders --- */
 .mode-specific-controls {
     width: 100%;
     padding: 0.25rem 0;
@@ -337,37 +375,69 @@ body {
     transform: scale(1.1);
 }
 
-/* ==========================================================================
-   INFO/RESULT PANEL
-   ========================================================================== */
-.control-panel.info-panel {
-    bottom: 1.5rem;
-    z-index: 15;
-    text-align: center;
-    padding: 1rem 1.5rem;
+/* --- Minimised state
+     Must come AFTER .control-panel.header so it correctly overrides padding
+     and min-width without needing !important.
+     display: flex !important is kept because .hidden (display: none !important)
+     might be toggled off — we need flex to win over any inline style.         --- */
+.control-panel.header.panel-minimised {
+    padding: 0.5rem 1rem;
+    min-width: unset;
+    width: auto;
+    cursor: pointer;
+    display: flex !important;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.25s ease;
 }
 
-.info-text {
-    font-size: 1rem;
-    color: #1f2937;
-    margin: 0;
+/* Hide everything inside when minimised */
+.control-panel.header.panel-minimised .header-content,
+.control-panel.header.panel-minimised .instruction {
+    display: none !important; /* must win over flex/block from component styles */
+}
+
+/* Show a compact label via a child span injected by JS */
+.panel-minimised-label {
+    display: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #374151;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.control-panel.header.panel-minimised .panel-minimised-label {
+    display: inline;
 }
 
 /* ==========================================================================
-   FEATURE INFO PANEL (Info Pointer Mode)
+   INFO POINTER PANEL
+   --------------------------------------------------------------------------
+   .control-panel.feature-info-panel is a fixed overlay — it sits outside
+   the normal document flow so it doesn't inherit .control-panel.header's
+   left/transform centring.
    ========================================================================== */
+
 .control-panel.feature-info-panel {
+    position: fixed;
     top: 1rem;
     right: 1rem;
-    left: auto;
-    transform: none;
+    left: auto;             /* cancel any inherited left value */
+    transform: none;        /* cancel the base translateX(-50%) */
     z-index: 25;
     min-width: 320px;
     max-width: 400px;
     max-height: 80vh;
     overflow: visible;
-    padding: 0;
-    position: fixed;
+    padding: 0;             /* inner sections own their own padding */
+    pointer-events: auto;
+}
+
+.control-panel.feature-info-panel * {    
+    pointer-events: auto; 
 }
 
 .feature-info-header {
@@ -378,7 +448,6 @@ body {
     border-bottom: 1px solid #e5e7eb;
     background: #f9fafb;
     border-radius: 0.875rem 0.875rem 0 0;
-    cursor: move;
     cursor: grab;
     user-select: none;
 }
@@ -475,15 +544,15 @@ body {
 }
 
 /* ==========================================================================
-   INFO POINTER + PANEL TOGGLE BUTTONS (shared ctrl group in top-right)
+   MAP CONTROLS & MARKERS
    ========================================================================== */
 
-/* Both buttons live inside one maplibregl-ctrl-group — no extra positioning needed */
 #custom-map-controls {
     display: flex;
     flex-direction: column;
 }
 
+/* Shared base for both map-control buttons */
 .info-pointer-btn,
 .panel-toggle-btn {
     background: white;
@@ -527,9 +596,26 @@ body {
     color: white;
 }
 
-/* ==========================================================================
-   MAP MARKERS
-   ========================================================================== */
+/* Setup cursor styles for info pointer mode */
+.info-pointer-active .maplibregl-canvas-container,
+.info-pointer-active .maplibregl-canvas,
+.info-pointer-active canvas {
+    cursor: default !important;
+}
+
+.info-pointer-active.map-info .maplibregl-canvas-container,
+.info-pointer-active.map-info .maplibregl-canvas,
+.info-pointer-active.map-info canvas {
+    cursor: crosshair !important;
+}
+
+.info-pointer-active.map-panning .maplibregl-canvas-container,
+.info-pointer-active.map-panning .maplibregl-canvas,
+.info-pointer-active.map-panning canvas {
+    cursor: grabbing !important;
+}
+
+/* Map markers (circular pins placed by JS) */
 .marker {
     width: 42px;
     height: 42px;
@@ -556,126 +642,36 @@ body {
 }
 
 /* ==========================================================================
-   UTILITIES
-   ========================================================================== */
-.hidden {
-    display: none !important;
-}
-
-/* ==========================================================================
-   POINTER EVENTS (Critical for map interaction)
-   ========================================================================== */
-/* Let clicks pass through floating panels to the map underneath */
-.control-panel.info-panel {
-    pointer-events: none;
-}
-
-/* But keep ALL interactive elements in header clickable */
-.control-panel.header,
-.control-panel.header *,
-.control-panel.feature-info-panel,
-.control-panel.feature-info-panel *,
-#info-box,
-#info-box * {
-    pointer-events: auto;
-}
-
-/* ==========================================================================
-   CONTROL PANEL TOGGLE – minimised state
-   ========================================================================== */
-
-/* When minimised, collapse everything except a slim title bar */
-.control-panel.header.panel-minimised {
-    padding: 0.5rem 1rem;
-    min-width: unset;
-    width: auto;
-    cursor: pointer;
-    display: flex !important;
-    flex-direction: row;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    transition: all 0.25s ease;
-}
-
-/* Hide everything inside when minimised */
-.control-panel.header.panel-minimised .header-content,
-.control-panel.header.panel-minimised .instruction {
-    display: none !important;
-}
-
-/* Show a compact label via a child span injected by JS */
-.panel-minimised-label {
-    display: none;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #374151;
-    white-space: nowrap;
-    pointer-events: none;
-}
-
-.control-panel.header.panel-minimised .panel-minimised-label {
-    display: inline;
-}
-
-/* Panel toggle button in top-right controls */
-.panel-toggle-btn {
-    background: white;
-    border: 2px solid rgba(0, 0, 0, 0.1);
-    border-radius: 4px;
-    width: 29px;
-    height: 29px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 700;
-    color: #374151;
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
-    transition: all 0.2s ease;
-    min-height: unset;
-    min-width: unset;
-    padding: 0;
-    line-height: 1;
-}
-
-.panel-toggle-btn:hover {
-    background: #f0f9ff;
-    border-color: #3b82f6;
-    color: #3b82f6;
-}
-
-.panel-toggle-btn.active {
-    background: #3b82f6;
-    border-color: #3b82f6;
-    color: white;
-}
-
-/* ==========================================================================
    SEARCH PANEL (top-left, fixed position)
+   --------------------------------------------------------------------------
+   .search-panel is a standalone positioned element — it does NOT extend
+   .control-panel in the HTML, so it needs its own visual chrome AND position.
+   #info-box lives inside it, so it's a plain in-flow block with no position
+   of its own.
    ========================================================================== */
+
 .search-panel {
     position: absolute;
     top: 10px;
     left: 10px;
-    /* Override .control-panel centering */
-    transform: none !important;
-    left: 10px !important;
     z-index: 15;
     width: 340px;
+    max-height: calc(100vh - 20px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    /* Visual chrome (same language as .control-panel but independent) */
     background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #e0f2fe;
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
     padding: 16px;
     font-family: 'Inter', sans-serif;
-    /* Not centered – override base .control-panel */
-    min-width: unset;
-    max-width: unset;
-    border: 1px solid #e0f2fe;
+    pointer-events: auto;
 }
 
-/* Dataset selector styling */
+.search-panel * { pointer-events: auto; }
+
+/* Dataset radio buttons */
 .dataset-selector {
     display: flex;
     gap: 16px;
@@ -707,7 +703,7 @@ body {
     margin: 0;
 }
 
-/* Search bar */
+/* Search input row */
 .search-bar {
     display: flex;
     flex-direction: column;
@@ -736,7 +732,7 @@ body {
     color: #9ca3af;
 }
 
-/* Search button – scoped to search panel only */
+/* Search button — scoped so it doesn't affect buttons inside map controls */
 .search-panel button {
     width: 100%;
     padding: 10px 20px;
@@ -829,7 +825,28 @@ body {
 .error { color: #dc2626; }
 .error::before { content: "⚠️ "; }
 
-/* Popup styling */
+/* Info/result box — lives in-flow inside .search-panel */
+#info-box {
+    /* Flow naturally inside the search panel */
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+
+.info-text {
+    font-size: 0.875rem;   /* 14px — slightly smaller than before to fit the narrower panel */
+    color: #1e40af;        /* dark blue to complement the light blue background */
+    margin: 0;
+    line-height: 1.6;
+}
+
+/* MapLibre popups spawned from search results */
 .unit-popup {
     max-width: 320px !important;
     font-family: 'Inter', sans-serif;
@@ -850,6 +867,14 @@ body {
 .maplibregl-popup-close-button:hover {
     background: #f3f4f6;
     color: #1f2937;
+}    
+/* ==========================================================================
+   UTILITIES
+   ========================================================================== */
+
+   /* display: none !important needed so .hidden beats component display values */
+.hidden {
+    display: none !important;
 }
 
 /* ==========================================================================
@@ -920,6 +945,7 @@ body {
         width: calc(100vw - 20px);
         left: 10px;
         right: 10px;
+        max-height: calc(100vh - 20px);
     }
 
     .dataset-selector {
@@ -928,8 +954,12 @@ body {
     }
 
     .results-list {
-        max-height: 240px;
-    }    
+        max-height: 180px;
+    }
+
+    #info-box {
+        max-height: 160px;
+    }
 }
 
 @media (max-width: 400px) {

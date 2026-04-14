@@ -1,8 +1,24 @@
 // ============================================================================
-// CONFIGURATION & CONSTANTS
+// ROUTING & SERVICES ANALYSIS APPLICATION
 // ============================================================================
+// This application provides:
+// - Route planning (A→B and multi-point TSP optimization)
+// - Nearest facility finding (hospitals, fire stations, police)
+// - Service area calculation (reachability analysis)
+// - Building/unit search with 3D visualization
+// - Feature inspection tool (info pointer)
 
-// --- All map styles  ---
+// ============================================================================
+// SECTION 1: CONFIGURATION & CONSTANTS
+// ============================================================================
+// All application settings and fixed values are defined here
+// Change these values to customize the application behavior
+
+// --- Map Style Definitions ---
+// Each style is a different way of looking at the map.
+// pitch  = how much the map tilts (0 = flat top-down, 60 = tilted like a 3D view)
+// zoom   = how close/far the initial camera is
+// bearing = compass rotation (0 = north up, 45 = rotated 45 degrees clockwise)
 const STYLES = [
     { id: 'basic-style',name: 'Default',   url: '/styles/mt-basic-style.json', pitch: 0, zoom: 10, bearing: 0 },
     { id: 'sat-style',  name: 'Satellite', url: '/styles/mt-sat-style.json', pitch: 0, zoom: 10, bearing: 0 },
@@ -71,6 +87,7 @@ const MAX_SEARCH_DISTANCE_KM = 30;  // Max search radius
 // ============================================================================
 // SECTION 2: APPLICATION STATE
 // ============================================================================
+
 // "State" = the current memory of everything happening in the app right now.
 // Whenever something changes (user clicks, mode switches, etc.) we update
 // the relevant property in this object so the rest of the app knows about it.
@@ -95,16 +112,16 @@ const state = {
     },
     
     // --- Facility Search State ---
-  // Separate array for the result markers (hospitals, police, etc.) shown after a search.
+    // Separate array for the result markers (hospitals, police, etc.) shown after a search.
     // We keep these separate so we can remove just the results without touching the search pin.
     facilityMarkers: [],
 
-    // --- Route Data (stored so we can redraw after switching map styles) ---
-    currentRouteData:  null, // Route(s) for the Route mode (A→B)
-    lastTSPRouteData:  null, // Route data for TSP mode
-    lastFacilityData:  null, // Full API response from the nearest facility search
-    lastServiceData:   null, // Full API response from the service area calculation
-    
+    // Saved API data — Route Data needed to redraw layers after style switches
+    lastRouteData: null, // Array of FeatureCollections for /route
+    lastTSPRouteData:  null, // { segments, waypoint_order }
+    lastFacilityData:  null, // Full /nearest_facility API response
+    lastServiceData:   null, // Full /service_area API response
+
     // --- User Settings ---
     serviceMinutes:      5,          // Minutes for service area
     facilityCount:       5,          // How many facilities to find
@@ -123,14 +140,13 @@ const state = {
     panelPosition: null             // Last saved position of the info panel
 };
 
-// --- Module-Level Variables ---
-// These live outside `state` because they're used by specific features
-// and don't need to be part of the global state object.
+
+// Module-level vars
 let currentDataset    = 'units';       // Which Elasticsearch index to search: 'units' or 'floors'
 let currentStyleId    = 'basic-style'; // Which map style is currently active
 let currentHighlightIds = [];          // Layer IDs for 3D search highlights (so we can remove them)
 let currentPopup      = null;          // The currently open map popup (so we can close it later)
-
+let facilitySearchId  = 0;             // Incremented each search to detect stale responses
 
 // ============================================================================
 // SECTION 3: MAP INITIALIZATION
@@ -145,16 +161,15 @@ function initMap() {
     // Create the MapLibre map inside the HTML element with id="map"
     state.map = new maplibregl.Map({
         container:  'map',
-        style:      STYLES[0].url,       // Start with the Default style
-        center:     state.currentCenter, // Use current state for center/zoom so we can preserve on style switch
+        style:      STYLES[0].url,
+        center:     state.currentCenter,
         zoom:       state.currentZoom,
         pitch:      state.currentPitch,
         bearing:    state.currentBearing,
-        maxPitch:   85                   // Maximum tilt angle allowed
+        maxPitch:   85
     });
 
-    // Whenever the user pans/zooms/tilts, save the new camera position to state.
-    // This is important so we can restore the same view when switching map styles.
+    // Keep camera state in sync so style switches can restore the view
     state.map.on('moveend', () => {
         state.currentCenter  = state.map.getCenter().toArray();
         state.currentZoom    = state.map.getZoom();
@@ -171,34 +186,23 @@ function initMap() {
     // Set up the sliders (max values, initial display values)
     initializeSliders();
 
+    // Inject the info-pointer button and panel-toggle button into the map UI
+    injectMapButtons();
+
     // Attach click/change listeners to all sidebar buttons and inputs
     setupEventHandlers();
 
     // When the map finishes loading its initial tiles and style:
     state.map.on('load', () => {
         showInfo('Click anywhere to begin routing of two points'); // Initial instruction message
-
-        // Create the invisible highlight layers used by the info pointer tool
-        setupInfoPointerLayers();
-
-        // Inject the info-pointer button and panel-toggle button into the map UI
-        injectMapButtons();
     });
 
-    // When the map style changes (user switches Default → Satellite etc.),
-    // re-create the info pointer layers because they get wiped out by style changes.
-    state.map.on('styledata', () => {
-        if (state.infoPointerActive) {
-            setupInfoPointerLayers();
-        }
-    });
 }
 
 // ============================================================================
-// SECTION 4: MAP CONTROLS
+// SECTION 4: MAP CONTROLS & UI HELPERS
 // ============================================================================
 // Custom buttons and controls that appear on the map itself.
-
 /**
  * Build the layer-switcher control (Default / Satellite / 3D / BDF buttons).
  * MapLibre requires controls to be objects with onAdd() and onRemove() methods.
@@ -273,146 +277,14 @@ async function switchMapStyle(style) {
     });
 }
 
-// --- Restore functions ---
-// Each function redraws one mode's data after a style switch.
-// They read from the saved state (currentRouteData, lastFacilityData, etc.)
-// so no new API calls are needed.
-
-/** Redraw A→B route(s) after a style switch */
-function restoreRouteLayers() {
-    if (!Array.isArray(state.currentRouteData)) return;
-    state.currentRouteData.forEach((route, i) => {
-        addRouteLayer(route, getRouteColor(i), i === 0 ? 0.9 : 0.6, i === 0 ? 7 : 5, `route-${i}`);
-    });
-}
-
-/**
- * Redraw TSP route + re-add all waypoint markers after a style switch.
- * Each marker uses the same color it had originally (stored in state.markers.tsp).
- */
-function restoreTSPRoute() {
-    if (!state.lastTSPRouteData) return;
-
-    // Re-draw each colored route segment
-    // state.lastTSPRouteData is an array: one FeatureCollection per segment
-    state.lastTSPRouteData.forEach((segmentData, i) => {
-        const color = TSP_COLORS[i % TSP_COLORS.length];
-        addRouteLayer(segmentData, color, 0.9, 6, `tsp-segment-${i}`);
-    });
-
-    // Re-add the numbered markers (they disappear when the style is swapped)
-    state.markers.tsp.forEach((item, index) => {
-        // Remove the old marker object (it's been detached from the map by the style change)
-        if (item.marker) item.marker.remove();
-
-        // Create a fresh marker with the same position and color
-        item.marker = new maplibregl.Marker({
-            element: createMarker((index + 1).toString(), item.color)
-        })
-            .setLngLat(item.lngLat)
-            .addTo(state.map);
-    });
-}
-
-/**
- * Redraw facility LAYERS (route lines) after a style switch.
- *
- * IMPORTANT — what survives a style switch and what doesn't:
- *   - MapLibre MARKERS (DOM elements like the red pin and hospital icons)
- *     are attached to the map container div, NOT to the style.
- *     They survive style switches automatically — we must NOT call .addTo() again
- *     or we will create invisible duplicate markers that can never be removed.
- *   - MapLibre LAYERS / SOURCES (the route lines drawn with addSource/addLayer)
- *     ARE part of the style and get wiped on every style switch.
- *     We must re-add only these.
- *
- * So here we only rebuild the route line layer, leaving markers untouched.
- */
-function restoreFacilityData() {
-    if (!state.lastFacilityData || !state.markers.facility) return;
-
-    const facilityType = document.getElementById('facility-type-select')?.value || 'hospital';
-
-    // Remove any leftover facility layers before we add new ones
-    removeFacilityLayers();
-
-    // Re-draw all facility result markers and their route lines
-    rebuildFacilityRouteLayers(state.lastFacilityData, facilityType);
-}
-
-/** Redraw service area polygon + road network after a style switch */
-function restoreServiceArea() {
-    if (!state.lastServiceData || !state.markers.service) return;
-    rebuildServiceAreaLayers(state.lastServiceData);
-}
-
-/**
- * Helper: remove facility route layers from the map without touching markers.
- * Called before re-adding layers to prevent "Source already exists" errors.
- */
-function removeFacilityLayers() {
-    removeFacilityMarkers(); // Clear markers first so we don't leave orphaned lines without pins
-    ['facility-routes'].forEach(id => {
-        if (state.map.getLayer(id))  state.map.removeLayer(id);
-        if (state.map.getSource(id)) state.map.removeSource(id);
-    });
-}
-
-/**
- * Re-draw ONLY the route lines for the current facility results.
- * Used by restoreFacilityData() after a style switch.
- * Markers are NOT touched here because they survive style switches on their own.
- *
- * @param {Object} data         - Saved API response (state.lastFacilityData)
- * @param {string} facilityType - e.g. 'hospital'
- */
-function rebuildFacilityRouteLayers(data, facilityType) {
-    // Collect all route line features from every facility result
-    const allRouteFeatures = [];
-    data.facilities.forEach((facility, index) => {
-        if (facility.route?.features) {
-            facility.route.features.forEach(f => {
-                allRouteFeatures.push({
-                    ...f,
-                    properties: {
-                        ...f.properties,
-                        facility_name:  facility.name,
-                        facility_rank:  index + 1,
-                        travel_minutes: facility.travel_minutes
-                    }
-                });
-            });
-        }
-    });
-
-    if (allRouteFeatures.length === 0) return;
-
-    const facilityColor = FACILITY_COLORS[facilityType] || '#6366f1';
-
-    state.map.addSource('facility-routes', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: allRouteFeatures }
-    });
-    state.map.addLayer({
-        id:     'facility-routes',
-        type:   'line',
-        source: 'facility-routes',
-        paint: {
-            'line-color':   facilityColor,
-            'line-width':   ['interpolate', ['linear'], ['get', 'facility_rank'], 1, 6, 5, 3],
-            'line-opacity': 0.8
-        }
-    });
-}
-
 /**
  * Inject the info-pointer button (ℹ️) and panel-toggle button (◀) into the
  * top-right map control area. These can't be added via addControl() because
  * they need to share a group with the existing navigation buttons.
  */
 function injectMapButtons() {
-    const topRight = document.querySelector('.maplibregl-ctrl-top-right');
-    if (!topRight) return;
+    const topRight = document.querySelector('.maplibregl-ctrl-top-right'); // MapLibre's built-in control container
+    if (!topRight) return; // If the map controls haven't loaded yet, wait a bit and try again
 
     // Create a control group to hold both buttons
     const ctrlGroup = document.createElement('div');
@@ -481,8 +353,12 @@ function toggleControlPanel(btn) {
     btn.title     = isMinimised ? 'Show Control Panel' : 'Hide Control Panel';
 
     if (isMinimised) {
-        // When minimized: store the expand handler so we can remove it later
-        panel._expandHandler = () => toggleControlPanel(btn);
+        // Clicking the panel header while minimised expands it again
+        panel._expandHandler = (e) => {
+            // Don't expand when clicking interactive children
+            if (e.target.closest('button,input,select,label,.mode-btn,.route-opt-btn,.range-slider')) return;
+            toggleControlPanel(btn);
+        };
         panel.addEventListener('click', panel._expandHandler);
     } else {
         // When expanded: remove the expand-on-click handler
@@ -492,7 +368,6 @@ function toggleControlPanel(btn) {
         }
     }
 }
-
 
 // ============================================================================
 // SECTION 5: INFO POINTER FEATURE
@@ -508,11 +383,12 @@ function toggleControlPanel(btn) {
 function toggleInfoPointer() {
     state.infoPointerActive = !state.infoPointerActive;
 
-    const btn = document.querySelector('.info-pointer-btn');
+    const btn          = document.querySelector('.info-pointer-btn');
     const mapContainer = document.getElementById('map');
     const featurePanel = document.getElementById('feature-info-panel');
 
     if (state.infoPointerActive) {
+        setupInfoPointerLayers(); // Create the invisible highlight layers used to mark clicked features
         btn.classList.add('active');
         mapContainer.classList.add('info-pointer-active'); // CSS changes cursor to crosshair
         featurePanel.classList.remove('hidden');
@@ -520,14 +396,20 @@ function toggleInfoPointer() {
         setupDraggablePanel();   // Allow the user to drag the info panel around
         clearFeatureHighlight(); // Remove any old highlight from the map
         updateFeatureInfo({ html: '<p class="info-hint">Click on any feature to see its details</p>' });
+
+            // Add grab cursor on map pan
+        state.map.on('mousedown', onMapMouseDown);
+        document.addEventListener('mouseup', onMapMouseUp);
     } else {
         // --- Deactivate Info Pointer ---
         btn.classList.remove('active');
         mapContainer.classList.remove('info-pointer-active');
         featurePanel.classList.add('hidden');
-        
-        // Clean up
-        clearFeatureHighlight();
+        clearFeatureHighlight(); // Clean up
+
+        // Clean up pan listeners
+        state.map.off('mousedown', onMapMouseDown);
+        document.removeEventListener('mouseup', onMapMouseUp);
     }
 }
 
@@ -537,12 +419,6 @@ function toggleInfoPointer() {
  * There are three layers (fill, line, circle) to handle all geometry types.
  */
 function setupInfoPointerLayers() {
-    // If the style hasn't loaded yet, wait for it
-    if (!state.map.isStyleLoaded()) {
-        state.map.once('styledata', setupInfoPointerLayers);
-        return;
-    }
-
     // Create data source for highlighted features
     if (!state.map.getSource('feature-highlight')) {
         state.map.addSource('feature-highlight', {
@@ -610,6 +486,7 @@ function handleInfoPointerClick(e) {
                !id.startsWith('facility-');
     });
 
+    // If there are no valid features after filtering, show a message instead of an empty panel
     if (validFeatures.length === 0) {
         clearFeatureHighlight();
         updateFeatureInfo({ html: '<p class="info-hint">No base layer features at this location</p>' });
@@ -620,7 +497,7 @@ function handleInfoPointerClick(e) {
     const feature = validFeatures[0];
     
     // Highlight and display information
-    highlightFeature(feature);
+    updateFeatureHighlight(feature);
     displayFeatureInfo(feature);
 }
 
@@ -630,7 +507,7 @@ function handleInfoPointerClick(e) {
  *
  * @param {Object} feature - A GeoJSON feature from queryRenderedFeatures()
  */
-function highlightFeature(feature) {
+function updateFeatureHighlight(feature) {
     clearFeatureHighlight(); // Remove previous highlight first
 
     state.highlightedFeatureId   = feature.id;
@@ -653,20 +530,18 @@ function highlightFeature(feature) {
  */
 function displayFeatureInfo(feature) {
     const properties = feature.properties || {};
-    const layer = feature.layer.id;
-    const sourceLayer = feature.sourceLayer || 'N/A';
-    const geomType = feature.geometry.type;
+    const geomType   = feature.geometry.type;
 
     // Build HTML for layer information
     let html = `
         <div class="feature-layer-info">
-            <p><strong>Layer:</strong> ${layer}</p>
-            <p><strong>Source Layer:</strong> ${sourceLayer}</p>
+            <p><strong>Layer:</strong> ${feature.layer.id}</p>
+            <p><strong>Source Layer:</strong> ${feature.sourceLayer || 'N/A'}</p>
             <p><strong>Geometry:</strong> ${geomType}</p>
         </div>
     `;
 
-    // Add property information if available
+        // Add property information if available
     if (Object.keys(properties).length > 0) {
         html += '<div class="feature-properties">';
 
@@ -675,20 +550,20 @@ function displayFeatureInfo(feature) {
             const val = properties[key];
             if (val === null || val === undefined) return; // Skip empty values
 
-            // Format numbers nicely, stringify objects (like nested JSON)
+            // Format numbers nicely, stringify objects (like nested JSON), and leave strings as-is
             const formatted = typeof val === 'object'
                 ? JSON.stringify(val)
                 : typeof val === 'number'
                 ? val.toLocaleString()
                 : val;
-            
+
             html += `
                 <div class="feature-property">
                     <span class="property-key">${formatPropertyKey(key)}</span>
                     <span class="property-value">${formatted}</span>
                 </div>`;
         });
-        
+
         html += '</div>';
     } else {
         html += '<p class="info-hint">No properties available for this feature</p>';
@@ -747,7 +622,6 @@ function clearFeatureHighlight() {
         });
     }
 }
-
 // ============================================================================
 // SECTION 6: DRAGGABLE PANEL
 // ============================================================================
@@ -765,7 +639,7 @@ function setupDraggablePanel() {
     const header = document.querySelector('.feature-info-header');
     if (!panel || !header) return;
 
-    // Remove any previously attached drag listeners to avoid stacking them
+    // Remove stacked listeners from previous activations
     if (panel._dragStart) {
         header.removeEventListener('mousedown',  panel._dragStart);
         header.removeEventListener('touchstart', panel._dragStart);
@@ -776,9 +650,7 @@ function setupDraggablePanel() {
     }
 
     let isDragging = false;
-    let initialX = 0;
-    let initialY = 0;
-
+    let initialX = 0, initialY = 0;
     /**
      * Start dragging
      * @param {Event} e - Mouse or touch event
@@ -808,13 +680,11 @@ function setupDraggablePanel() {
     const drag = (e) => {
         if (!isDragging) return;
         e.preventDefault();
-
         const touch = e.touches?.[0] || e;
 
         // Calculate new position, clamped so the panel doesn't go off screen
         const newX = Math.max(0, Math.min(touch.clientX - initialX, window.innerWidth  - panel.offsetWidth));
         const newY = Math.max(0, Math.min(touch.clientY - initialY, window.innerHeight - panel.offsetHeight));
-
         panel.style.left = newX + 'px';
         panel.style.top  = newY + 'px';
     };
@@ -827,14 +697,14 @@ function setupDraggablePanel() {
 
     // --- Attach Event Listeners ---
     // Mouse events
-    header.addEventListener('mousedown', dragStart);
+    header.addEventListener('mousedown',  dragStart);
     document.addEventListener('mousemove', drag);
-    document.addEventListener('mouseup', dragEnd);
+    document.addEventListener('mouseup',   dragEnd);
     
     // Touch events (for mobile)
     header.addEventListener('touchstart', dragStart, { passive: false });
-    document.addEventListener('touchmove', drag, { passive: false });
-    document.addEventListener('touchend', dragEnd);
+    document.addEventListener('touchmove', drag,     { passive: false });
+    document.addEventListener('touchend',  dragEnd);
     
     // Save references on the panel element for cleanup next time
     panel._dragStart = dragStart;
@@ -848,20 +718,19 @@ function setupDraggablePanel() {
 function resetPanelPosition() {
     const panel = document.getElementById('feature-info-panel');
     if (!panel) return;
-
     // Reset to original CSS positioning
-    panel.style.left = 'auto';
-    panel.style.right = '1rem';
-    panel.style.top = '1rem';
-    panel.style.bottom = 'auto';
+    panel.style.left      = 'auto';
+    panel.style.right     = '1rem';
+    panel.style.top       = '1rem';
+    panel.style.bottom    = 'auto';
     panel.style.transform = 'none';
-    
-    state.panelPosition = null;
+    state.panelPosition   = null;
 }
 
 // ============================================================================
 // SECTION 7: UI INITIALIZATION & EVENT HANDLERS
 // ============================================================================
+
 // Set up sliders and attach event listeners to UI elements
 
 /**
@@ -874,13 +743,13 @@ function initializeSliders() {
     const fc = document.getElementById('facility-count-input');
     if (fc) fc.max = MAX_FACILITY_COUNT;
 
-    // Service time slider
-    const ti = document.getElementById('time-input');
-    if (ti) ti.max = MAX_SERVICE_MINUTES;
-
     // Search distance slider
     const di = document.getElementById('distance-input');
     if (di) di.max = MAX_SEARCH_DISTANCE_KM;
+
+    // Service time slider
+    const ti = document.getElementById('time-input');
+    if (ti) ti.max = MAX_SERVICE_MINUTES;
 }
 
 /**
@@ -888,15 +757,12 @@ function initializeSliders() {
  * This is called once during map initialization.
  */
 function setupEventHandlers() {
-    // --- Map Click ---
+    // All map clicks go through one gate
     // Route all map clicks through a single handler that decides what to do
     // based on whether the info pointer is active and which mode is current.
     state.map.on('click', (e) => {
-        if (state.infoPointerActive) {
-            handleInfoPointerClick(e); // Show feature data
-        } else {
-            handleMapClick(e);         // Place markers / run tools
-        }
+        if (state.infoPointerActive) handleInfoPointerClick(e); // Show feature data
+        else                          handleMapClick(e); // Place markers / run tools
     });
 
     // --- Feature Info Panel Close Button ---
@@ -906,12 +772,11 @@ function setupEventHandlers() {
     });
 
     // --- Mode Switcher Buttons ---
-    document.getElementById('mode-route')?.addEventListener('click', () => switchMode('route'));
-    document.getElementById('mode-tsp')?.addEventListener('click', () => switchMode('tsp'));
-    document.getElementById('mode-facility')?.addEventListener('click', () => switchMode('facility'));
-    document.getElementById('mode-service')?.addEventListener('click', () => switchMode('service'));
+    ['route', 'tsp', 'facility', 'service'].forEach(mode => {
+        document.getElementById(`mode-${mode}`)?.addEventListener('click', () => switchMode(mode));
+    });
 
-    // --- Route Optimization Buttons ---
+    // Route optimization
     document.getElementById('opt-fastest')?.addEventListener('click', () => {
         state.routeOptimization = 'fastest';
         updateRouteOptButtons();
@@ -920,76 +785,70 @@ function setupEventHandlers() {
             calculateRoute(state.markers.start.getLngLat(), state.markers.end.getLngLat());
         }
     });
-
     document.getElementById('opt-shortest')?.addEventListener('click', () => {
         state.routeOptimization = 'shortest';
         updateRouteOptButtons();
         // Recalculate route if markers exist
-        if (state.markers.start && state.markers.end) {
+        if (state.markers.start && state.markers.end)
             calculateRoute(state.markers.start.getLngLat(), state.markers.end.getLngLat());
-        }
     });
 
-    // --- Show Alternatives Checkbox ---
+    // Show alternatives checkbox
     document.getElementById('show-alternatives')?.addEventListener('change', (e) => {
         state.showAlternatives = e.target.checked;
         // Recalculate route if markers exist
-        if (state.markers.start && state.markers.end) {
+        if (state.markers.start && state.markers.end)
             calculateRoute(state.markers.start.getLngLat(), state.markers.end.getLngLat());
-        }
     });
 
-    // --- Service Time Slider ---
+    // Service time slider
     const timeInput = document.getElementById('time-input');
     const timeValue = document.getElementById('time-value');
     if (timeInput && timeValue) {
         timeValue.textContent = timeInput.value;
         timeInput.addEventListener('input', (e) => {
-            state.serviceMinutes = parseInt(e.target.value, 10);
+            state.serviceMinutes  = parseInt(e.target.value, 10);
             timeValue.textContent = state.serviceMinutes;
             // Recalculate service area if marker exists
-            if (state.markers.service) {
+            if (state.markers.service)
                 calculateServiceArea(state.markers.service.getLngLat());
-            }
         });
     }
 
-    // --- Facility Count Slider ---
+    // Facility count slider
     const facilityCountInput = document.getElementById('facility-count-input');
     const facilityCountValue = document.getElementById('facility-count-value');
     if (facilityCountInput && facilityCountValue) {
         facilityCountValue.textContent = facilityCountInput.value;
         facilityCountInput.addEventListener('input', (e) => {
-            state.facilityCount = parseInt(e.target.value, 10);
+            state.facilityCount   = parseInt(e.target.value, 10);
             facilityCountValue.textContent = state.facilityCount;
             // Recalculate facilities if search is active
-            if (state.markers.facility) {
+            if (state.markers.facility)
                 calculateNearestFacilities(state.markers.facility.getLngLat());
-            }
         });
     }
 
-    // --- Search Distance Slider ---
+    // Search distance slider
     const distanceInput = document.getElementById('distance-input');
     const distanceValue = document.getElementById('distance-value');
     if (distanceInput && distanceValue) {
         distanceValue.textContent = distanceInput.value;
         distanceInput.addEventListener('input', (e) => {
             state.searchDistanceKm = parseInt(e.target.value, 10);
-            distanceValue.textContent = state.searchDistanceKm;
+            distanceValue.textContent  = state.searchDistanceKm;
             // Recalculate facilities if search is active
-            if (state.markers.facility) {
+            if (state.markers.facility)
                 calculateNearestFacilities(state.markers.facility.getLngLat());
-            }
         });
     }
 
-    // --- Search Panel: press Enter to search ---
+    // Elasticsearch Search Panel: press Enter to search
     document.getElementById('searchInput')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') searchUnits();
     });
 
-    // --- Search Panel: switch between units and floors dataset ---
+    // Dataset radio buttons
     document.querySelectorAll('input[name="dataset"]').forEach(radio => {
         radio.addEventListener('change', (e) => {
             currentDataset = e.target.value;
@@ -1004,15 +863,10 @@ function setupEventHandlers() {
  */
 function updateRouteOptButtons() {
     // Remove active class from all buttons
-    document.querySelectorAll('.route-opt-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    
+    document.querySelectorAll('.route-opt-btn').forEach(btn => btn.classList.remove('active'));
     // Add active class to selected button
-    const activeBtn = state.routeOptimization === 'fastest' 
-        ? 'opt-fastest' 
-        : 'opt-shortest';
-    document.getElementById(activeBtn)?.classList.add('active');
+    document.getElementById(state.routeOptimization === 'fastest' ? 'opt-fastest' : 'opt-shortest')
+        ?.classList.add('active');
 }
 
 /**
@@ -1063,10 +917,8 @@ function switchMode(mode) {
  */
 function updateModeButtons(activeMode) {
     // Remove active class from all mode buttons
-    document.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    
+    document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+
     // Add active class to selected mode button
     document.getElementById(`mode-${activeMode}`)?.classList.add('active');
 }
@@ -1079,11 +931,11 @@ function updateModeButtons(activeMode) {
  */
 
 function updateModeInstructions(mode) {
-    // Show/hide relevant control sections
-    document.getElementById('time-slider')?.classList.toggle('hidden', mode !== 'service');
+    // Show/hide relevant control sections based on the active mode
+    document.getElementById('route-options')?.classList.toggle('hidden', mode !== 'route');
     document.getElementById('facility-selector')?.classList.toggle('hidden', mode !== 'facility');
     document.getElementById('facility-sliders-container')?.classList.toggle('hidden', mode !== 'facility');
-    document.getElementById('route-options')?.classList.toggle('hidden', mode !== 'route');
+    document.getElementById('time-slider')?.classList.toggle('hidden', mode !== 'service');
 
     // Define instructions for each mode
     const instructions = {
@@ -1116,8 +968,9 @@ function updateModeInstructions(mode) {
 }
 
 // ============================================================================
-// SECTION 9: ROUTE MODE (A→B Routing)
+// SECTION 9: ROUTE MODE (A→B)
 // ============================================================================
+
 // First click = green Start pin, second click = red End pin, route is calculated.
 // Third click resets and starts over.
 
@@ -1180,18 +1033,16 @@ async function calculateRoute(start, end) {
             throw new Error(data.error);
         }
 
-        // Normalize response format
-        // API can return either { routes: [...] } or a single FeatureCollection
-        const routes = (data.routes && Array.isArray(data.routes))
-            ? data.routes              // Multiple routes
-            : [data];                  // Single route - wrap in array
+        // API now ALWAYS returns { routes: [...] }.
+        const routes = data.routes;
+        if (!routes || routes.length === 0) throw new Error('No routes returned by the server.');
 
         // Store routes for style reload
-        state.currentRouteData = routes;
+        state.lastRouteData = routes;
 
         // Draw each route on the map
         routes.forEach((route, i) => {
-            const color = getRouteColor(i);
+            const color = ROUTE_COLORS[i] || '#5e8bbe';
             const opacity = i === 0 ? 0.9 : 0.6;   // Primary route more opaque
             const width = i === 0 ? 7 : 5;          // Primary route thicker
             addRouteLayer(route, color, opacity, width, `route-${i}`);
@@ -1200,37 +1051,24 @@ async function calculateRoute(start, end) {
         // Zoom map to fit all routes
         routes.length > 1 ? fitToMultipleRoutes(routes) : fitToFeatures(routes[0]);
 
-        // Build summary information
+        // Build info box — show a color swatch for each route so the user can
+        // match the text to the lines drawn on the map
         const best = routes[0];
         let summary = `✅ <strong>Best ${state.routeOptimization} route:</strong> ${best.duration_minutes} min • ${best.total_distance_km} km`;
-        
+
         if (routes.length > 1) {
-            summary += `<br><small>Showing ${routes.length} alternative routes</small>`;
+            summary += `<br><small>Showing ${routes.length} of ${data.requested} requested routes</small>`;
             routes.slice(1).forEach((r, i) => {
-                summary += `<br><small style="color:#60a5fa;">Route ${i + 2}: ${r.duration_minutes} min • ${r.total_distance_km} km</small>`;
+                const color = ROUTE_COLORS[i + 1] || '#5e8bbe';
+                summary += `<br><small style="color:${color};">● Route ${i + 2}: ${r.duration_minutes} min • ${r.total_distance_km} km</small>`;
             });
         }
-        
+
         showInfo(summary);
 
     } catch (error) {
         handleError('Route calculation', error);
     }
-}
-
-/**
- * Get color for route based on index
- * Primary route is darkest blue, alternatives are lighter
- * @param {number} index - Route index (0 = primary)
- * @returns {string} Hex color code
- */
-function getRouteColor(index) {
-    const colors = [
-        '#0865fc',  // Primary: Dark blue
-        '#4f9af7',  // Alternative 1: Medium blue
-        '#6095d3'   // Alternative 2: Light blue
-    ];
-    return colors[index] || '#5e8bbe';
 }
 
 /**
@@ -1258,7 +1096,7 @@ function fitToMultipleRoutes(routes) {
 }
 
 // ============================================================================
-// SECTION 10: TSP MODE (Multi-Point Optimization)
+// SECTION 10: TSP MODE
 // ============================================================================
 // Traveling Salesman Problem - find optimal route through multiple points
 // Click to add numbered waypoints. Once you have at least 3 points,
@@ -1273,6 +1111,23 @@ function fitToMultipleRoutes(routes) {
  * @param {Object} lngLat - Clicked coordinates { lng, lat }
  */
 function handleTSPClick(lngLat) {
+    // Prevent duplicate / too close clicks 
+    const MIN_DISTANCE_METERS = 100;
+
+    const isTooClose = state.markers.tsp.some(item => {
+        // Safe distance calculation without depending on turf or map.getDistance
+        const dx = item.lngLat.lng - lngLat.lng;
+        const dy = item.lngLat.lat - lngLat.lat;
+        const distanceMeters = Math.sqrt(dx*dx + dy*dy) * 111320; // rough conversion
+        return distanceMeters < MIN_DISTANCE_METERS;
+    });
+
+    if (isTooClose) {
+        showInfo('⚠️ This point is too close to an existing waypoint.<br>Please click somewhere else.');
+        return;
+    }
+
+    // Create new waypoint marker with a unique color and number
     const num   = state.markers.tsp.length + 1;         // Waypoint number (1-based)
     const color = TSP_COLORS[(num - 1) % TSP_COLORS.length]; // Pick a color from the palette
 
@@ -1285,8 +1140,7 @@ function handleTSPClick(lngLat) {
     state.markers.tsp.push({ marker, lngLat, color });
 
     if (state.markers.tsp.length < 3) {
-        const remaining = 3 - state.markers.tsp.length;
-        showInfo(`✅ Point ${num} added (${color.toUpperCase()}). Need ${remaining} more (min 3)`);
+        showInfo(`✅ Point ${num} added. Need ${3 - state.markers.tsp.length} more (min 3)`);
     } else {
         showInfo(`✅ Point ${num} added. Auto-calculating optimized route in 2 seconds...`);
         // Small delay so the user can keep clicking before calculation starts
@@ -1298,8 +1152,7 @@ function handleTSPClick(lngLat) {
 
 /**
  * Request an optimized multi-point route from the backend.
- * The result is drawn as separate colored segments — segment from point N to N+1
- * uses the same color as point N's marker.
+ * Each segment is now correctly colored based on the STARTING waypoint's color.
  */
 async function calculateTSP() {
     if (state.markers.tsp.length < 3) {
@@ -1310,86 +1163,49 @@ async function calculateTSP() {
     showInfo(`⏳ Solving TSP for ${state.markers.tsp.length} points...`);
     
     try {
-        // Extract coordinates from markers
+        // Extract coordinates from markers (in the order they were added)
         const points = state.markers.tsp.map(m => [m.lngLat.lng, m.lngLat.lat]);
         
-        // Send to the TSP API — it returns one big optimized route and the order of waypoints
+        // Send request to TSP API
         const data = await fetchWithTimeout(API_ENDPOINTS.tsp, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ points })
+            body:    JSON.stringify({ points })
         });
         
         if (data.error) {
             throw new Error(data.error);
         }
 
-        // ---------------------------------------------------------------
-        // COLOR INDIVIDUAL SEGMENTS
-        // ---------------------------------------------------------------
-        // The API returns a single combined route but also a `segments` array
-        // where each entry is the sub-route between two consecutive waypoints.
-        //
-        // waypoint_order tells us the optimized visiting sequence, e.g. [0,2,1,3].
-        // Segment 0 is the road from waypoint_order[0] → waypoint_order[1], etc.
-        // We color each segment using the color of the ORIGIN waypoint in that leg.
+        // Clear any previous TSP layers before drawing new ones
+        clearTSPLayers();
 
-        clearTSPLayers(); // Remove any previous TSP route layers
+        // Save to the TSP-specific state slot so restoreTSPRoute() can find it.
+        // Also persist waypoint_order here so restore has it too.
+        state.lastTSPRouteData = {
+            segments:       data.segments,      // Array of per-leg FeatureCollections
+            waypoint_order: data.waypoint_order // e.g. [2, 0, 1, 2] (0-based, closes loop)
+        };
 
-        const order = data.waypoint_order || points.map((_, i) => i); // Fallback: original order
+        // Draw each leg segment with the color of its STARTING waypoint.
+        drawTSPSegments(data.segments, data.waypoint_order);
 
-        if (data.segments && Array.isArray(data.segments)) {
-            // API provided separate segments — draw each one in its own color
-            const segmentDataArray = [];
-
-            data.segments.forEach((segment, segIndex) => {
-                // The origin waypoint for this segment
-                const originWaypointIndex = order[segIndex] ?? segIndex;
-                const color = TSP_COLORS[originWaypointIndex % TSP_COLORS.length];
-
-                addRouteLayer(segment, color, 0.9, 6, `tsp-segment-${segIndex}`);
-                segmentDataArray.push(segment);
-            });
-
-            state.lastTSPRouteData = segmentDataArray; // Save for style-switch restoration
-
-        } else {
-            // API returned one combined route — split features into groups and color them
-            // Each feature in the FeatureCollection is roughly one road segment;
-            // we distribute them evenly across waypoint colors.
-            const features  = data.features || [];
-            const numLegs   = order.length - 1 || 1;
-            const chunkSize = Math.ceil(features.length / numLegs);
-            const segmentDataArray = [];
-
-            for (let legIndex = 0; legIndex < numLegs; legIndex++) {
-                const legFeatures = features.slice(legIndex * chunkSize, (legIndex + 1) * chunkSize);
-                if (legFeatures.length === 0) continue;
-
-                const originWaypointIndex = order[legIndex] ?? legIndex;
-                const color  = TSP_COLORS[originWaypointIndex % TSP_COLORS.length];
-                const legGeoJSON = { type: 'FeatureCollection', features: legFeatures };
-
-                addRouteLayer(legGeoJSON, color, 0.9, 6, `tsp-segment-${legIndex}`);
-                segmentDataArray.push(legGeoJSON);
-            }
-
-            state.lastTSPRouteData = segmentDataArray;
+        // Fit map to the first segment's bounds (rough but fast)
+        if (data.segments && data.segments.length > 0) {
+            fitToFeatures(data.segments[0]);
         }
 
-        // Zoom map to show the full route
-        fitToFeatures(data);
-
-        // Build a color-coded summary of the optimized visiting order
-        const orderStr = order.map((waypointIdx, legIdx) => {
-            const color  = TSP_COLORS[waypointIdx % TSP_COLORS.length];
-            return `<span style="color:${color};font-weight:bold">${waypointIdx + 1}</span>`;
-        }).join(' → ');
+        // Build visit order string with matching colors
+        const orderStr = data.waypoint_order.map(idx => {
+                const color = TSP_COLORS[idx % TSP_COLORS.length];
+                return `<span style="color:${color};font-weight:bold;">${idx + 1}</span>`;
+            })
+            .join(' <span style="color:#6b7280;">→</span> ');
 
         showInfo(`
             ✅ <strong>TSP Optimized!</strong><br>
             Order: ${orderStr}<br>
-            ${data.duration_minutes} min • ${data.total_distance_km} km
+            ${data.duration_minutes} min • ${data.total_distance_km} km • ${data.segment_count} legs
         `);
 
     } catch (error) {
@@ -1397,6 +1213,30 @@ async function calculateTSP() {
     }
 }
 
+/**
+ * Draw each TSP leg as a colored route layer.
+ *
+ * Color rule:
+ *   Leg i goes from waypoint_order[i] → waypoint_order[i+1].
+ *   The color of leg i = TSP_COLORS[ waypoint_order[i] % TSP_COLORS.length ].
+ *   This matches the marker color at the starting point of that leg.
+ *
+ *
+ * @param {Array}  segments       - Array of GeoJSON FeatureCollections (one per leg)
+ * @param {Array}  waypoint_order - 0-based indices in visit order (length = segments+1,
+ *                                  last entry closes the loop back to the first)
+ */
+function drawTSPSegments(segments, waypoint_order) {
+    if (!segments || segments.length === 0) return;
+
+    segments.forEach((segmentData, i) => {
+        // waypoint_order[i] is the STARTING waypoint of this leg
+        const startWaypointIdx = waypoint_order ? waypoint_order[i] : i;
+        const color            = TSP_COLORS[startWaypointIdx % TSP_COLORS.length];
+
+        addRouteLayer(segmentData, color, 0.95, 6.5, `tsp-segment-${i}`);
+    });
+}
 
 // ============================================================================
 // SECTION 11: NEAREST FACILITY MODE
@@ -1406,23 +1246,14 @@ async function calculateTSP() {
 
 // A counter that increments with every new facility search.
 // If the API response comes back with an outdated counter value, we discard it.
-// This prevents a slow first search from overwriting the results of a faster second search.
-let _facilitySearchId = 0;
 
 /**
- * Handle map clicks in Facility mode.
- * BUG FIX: clearFacilityData() is called FIRST to fully remove all previous
- * markers AND layers before placing a new search pin. Previously, the layers
- * were not being removed, causing the old ones to persist on the map.
- *
  * @param {Object} lngLat - Clicked coordinates { lng, lat }
  */
 function handleFacilityClick(lngLat) {
-    // Step 1: Remove EVERYTHING from the previous facility search
-    // (old search pin, result markers, and route lines)
-    clearFacilityData();
+    clearFacilityData(); // Clears previous search pin, result markers, and route layers
 
-    // Step 2: Place the new search-location pin (red map pin)
+    //Place the new search-location pin (red map pin)
     state.markers.facility = new maplibregl.Marker({ element: createMarker('📍', '#dc2626') })
         .setLngLat(lngLat)
         .addTo(state.map);
@@ -1435,7 +1266,7 @@ function handleFacilityClick(lngLat) {
  * Send a request to the API to find nearby facilities and draw the results.
  *
  * The search ID trick:
- *   Every call increments _facilitySearchId and captures its own copy of that number.
+ *   Every call increments facilitySearchId and captures its own copy of that number.
  *   When the API responds, the function checks whether the captured ID still matches
  *   the current ID. If the user clicked a new location while this request was in flight,
  *   the IDs won't match and this stale response is silently discarded.
@@ -1444,7 +1275,7 @@ function handleFacilityClick(lngLat) {
  */
 async function calculateNearestFacilities(lngLat) {
     // Capture a unique ID for this particular search request
-    const mySearchId = ++_facilitySearchId;
+    const mySearchId = ++ facilitySearchId;
 
     const facilityType = document.getElementById('facility-type-select')?.value || 'hospital';
     showInfo(`⏳ Searching for nearest ${facilityType}s within ${state.searchDistanceKm}km...<br><small>This may take a few seconds</small>`);
@@ -1454,8 +1285,8 @@ async function calculateNearestFacilities(lngLat) {
         const data = await fetchWithTimeout(url);
 
         // If the user clicked a new location while this request was running,
-        // mySearchId will be less than _facilitySearchId — discard this response.
-        if (mySearchId !== _facilitySearchId) return;
+        // mySearchId will be less than facilitySearchId — discard this response.
+        if (mySearchId !== facilitySearchId) return;
 
         if (data.error) throw new Error(data.error);
 
@@ -1468,7 +1299,7 @@ async function calculateNearestFacilities(lngLat) {
 
     } catch (error) {
         // Only show the error if this is still the active search
-        if (mySearchId === _facilitySearchId) {
+        if (mySearchId === facilitySearchId) {
             handleError('Facility search', error);
         }
     }
@@ -1546,40 +1377,15 @@ function displayFacilityResults(lngLat, data, facilityType) {
 
         // Create custom marker element
         const el = document.createElement('div');
-        el.style.cssText = `
-            width:48px;
-            height:48px;
-            background:${color};
-            border:3px solid white;
-            border-radius:50%;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            font-size:24px;
-            box-shadow:0 4px 12px rgba(0,0,0,0.3);
-            cursor:pointer;
-            position:relative;
-        `;
+        el.className = 'facility-marker';
+        el.style.background = color;
         el.innerHTML = icon;
 
         // Add rank badge
         const badge = document.createElement('div');
-        badge.style.cssText = `
-            position:absolute;
-            top:-8px;
-            right:-8px;
-            width:24px;
-            height:24px;
-            background:white;
-            border:2px solid ${color};
-            border-radius:50%;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            font-size:12px;
-            font-weight:bold;
-            color:${color};
-        `;
+        badge.className = 'rank-badge';
+        badge.style.borderColor = color;
+        badge.style.color = color;
         badge.textContent = index + 1;
         el.appendChild(badge);
 
@@ -1604,43 +1410,48 @@ function displayFacilityResults(lngLat, data, facilityType) {
                         </p>
                     </div>
                 `)
-        const marker = new maplibregl.Marker({ element: el })
+
+        // Create marker        
+        const marker = new maplibregl.Marker({ 
+            element: el,
+            anchor: 'center',           // explicit (default anyway)
+            offset: [0, -6]              // or [0, -5] if you want slight adjustment 
+            })
             .setLngLat([parseFloat(facility.facility_lon), parseFloat(facility.facility_lat)])
             .setPopup(popup)
             .addTo(state.map);
 
+        // Store popup on marker for cleanup
+        marker._popup = popup;
 
-        let timeout;                
+        let closeTimeout;
         //open popup on mouse enter
-        el.addEventListener('mouseenter', () => { 
-            clearTimeout(timeout); 
-            marker.togglePopup(); 
+        el.addEventListener('mouseenter', () => {
+            clearTimeout(closeTimeout); //cancel pending close on re-enter
+            if (!marker.getPopup().isOpen()) marker.togglePopup();
         });
 
         //Hide popup on mouse leave smoothly with a small delay to allow moving the mouse into the popup without it disappearing immediately
-        el.addEventListener('mouseleave', () => { 
-            timeout = setTimeout(() => {
-                if (marker.getPopup().isOpen()) {
-                    marker.togglePopup();
-                }
+        el.addEventListener('mouseleave', () => {
+            closeTimeout = setTimeout(() => {
+                if (marker.getPopup().isOpen()) marker.togglePopup();
             }, 200);
         });
 
         return marker;
     });
 
-    // Save full response so style-switch can restore without another API call
     state.lastFacilityData = data;
 
-    // --- Build summary text for the info box ---
+    // Build summary text for the info box
     const closest = data.facilities[0];
     const icon = FACILITY_ICONS[facilityType] || '📍';
     const list = data.facilities.map((f, i) => 
         `${i + 1}. ${FACILITY_ICONS[f.type] || '📍'} ${f.name} (${f.travel_minutes} min)`
-    ).join('<br>');
+        ).join('<br>');
 
     showInfo(`
-        ✅ Found ${data.count} ${facilityType}${data.count > 1 ? 's' : ''} within ${state.searchDistanceKm}km
+        ✅ Found ${data.count} ${facilityType}${data.count > 1 ? 's' : ''} within ${state.searchDistanceKm} km
         <br><strong>Closest:</strong> ${icon} ${closest.name}
         <br><strong>Travel time:</strong> ${closest.travel_minutes} minutes
         ${closest.crow_distance_km ? `<br><small>Straight-line: ${closest.crow_distance_km.toFixed(1)} km</small>` : ''}
@@ -1650,29 +1461,77 @@ function displayFacilityResults(lngLat, data, facilityType) {
     // Zoom to fit all facilities and the search point in the viewport
     const bounds = new maplibregl.LngLatBounds();
     bounds.extend([lngLat.lng, lngLat.lat]);
-    data.facilities.forEach(f => {
-        bounds.extend([parseFloat(f.facility_lon), parseFloat(f.facility_lat)]);
-    });
-    
+    data.facilities.forEach(f => bounds.extend([parseFloat(f.facility_lon), parseFloat(f.facility_lat)]));
     state.map.fitBounds(bounds, { 
-        padding: { top: 80, bottom: 80, left: 80, right: 80 }, 
-        maxZoom: 14, 
-        duration: 1000 
-    });
+        padding: { top: 80, bottom: 80, left: 80, right: 80 },
+        maxZoom: 14,
+        duration: 1000 });
 }
 
 // Helper function to remove facility markers
 function removeFacilityMarkers() {
-    const layers = ['facility-circles', 'facility-rank', 'facility-icons'];
-    layers.forEach(id => {
-        if (state.map.getLayer(id)) state.map.removeLayer(id);
+    // Close popup before removing marker
+    state.facilityMarkers.forEach(m => {
+        if (m._popup && m._popup.isOpen()) m._popup.remove();
+        m.remove();
     });
-    
-    if (state.map.getSource('facility-points')) {
-        state.map.removeSource('facility-points');
-    }
+    state.facilityMarkers = [];
 }
 
+/**
+ * Helper: remove facility route layers from the map without touching markers.
+ * Called before re-adding layers to prevent "Source already exists" errors.
+ */
+function removeFacilityLayers() {
+    ['facility-routes'].forEach(id => {
+        if (state.map.getLayer(id))  state.map.removeLayer(id);
+        if (state.map.getSource(id)) state.map.removeSource(id);
+    });
+}
+
+/**
+ * Re-draw ONLY the route lines for the current facility results.
+ * Used by restoreFacilityData() after a style switch.
+ * Markers are NOT touched here because they survive style switches on their own.
+ *
+ * @param {Object} data         - Saved API response (state.lastFacilityData)
+ * @param {string} facilityType - e.g. 'hospital'
+ */
+function rebuildFacilityRouteLayers(data, facilityType) {
+    // Collect all route line features from every facility result
+    const allRouteFeatures = [];
+    data.facilities.forEach((facility, index) => {
+        if (facility.route?.features) {
+            facility.route.features.forEach(f => {
+                allRouteFeatures.push({
+                    ...f,
+                    properties: {
+                        ...f.properties,
+                        facility_rank: index + 1 
+                    }
+                });
+            });
+        }
+    });
+    if (allRouteFeatures.length === 0) return;
+
+    const facilityColor = FACILITY_COLORS[facilityType] || '#6366f1';
+
+    state.map.addSource('facility-routes', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: allRouteFeatures }
+    });
+    state.map.addLayer({
+        id:     'facility-routes',
+        type:   'line',
+        source: 'facility-routes',
+        paint: {
+            'line-color':   facilityColor,
+            'line-width':   ['interpolate', ['linear'], ['get', 'facility_rank'], 1, 6, 5, 3],
+            'line-opacity': 0.8
+        }
+    });
+}
 
 // ============================================================================
 // SECTION 12: SERVICE AREA MODE
@@ -1691,6 +1550,7 @@ function handleServiceClick(lngLat) {
     // Remove old marker if exists
     if (state.markers.service) {
         state.markers.service.remove();
+        state.markers.service = null;
     }
     
     // Place service center marker
@@ -1716,16 +1576,12 @@ async function calculateServiceArea(lngLat) {
             `${API_ENDPOINTS.serviceArea}?lon=${lngLat.lng}&lat=${lngLat.lat}&minutes=${state.serviceMinutes}`
         );
         
-        if (data.error) {
-            throw new Error(data.error);
-        }
-             
-        clearServiceArea(); // Remove old service area layers  
+        if (data.error) throw new Error(data.error);
         
         state.lastServiceData = data; // Save for style-switch restoration
         
         // Build all layers
-        rebuildServiceAreaLayers(data);
+        drawServiceArea(data);
 
         // Zoom to fit the service area polygon
         if (data.service_area.coordinates?.[0]) {
@@ -1751,370 +1607,69 @@ async function calculateServiceArea(lngLat) {
  *
  * @param {Object} data - Saved response from service area API
  */
-function rebuildServiceAreaLayers(data) {
+function drawServiceArea(data) {
     // Clean old layers first
     clearServiceArea();
 
     // Reachable road network
-    state.map.addSource('service-network', { 
-        type: 'geojson', 
-        data: data.reachable_network 
-    });
-    state.map.addLayer({ 
-        id: 'service-network', 
-        type: 'line', 
-        source: 'service-network', 
-        paint: { 
-            'line-color': '#f59e0b', 
-            'line-width': 3, 
-            'line-opacity': 0.6 
-        } 
-    });
+    if (data.reachable_network) {
+        state.map.addSource('service-network', { 
+            type: 'geojson', 
+            data: data.reachable_network 
+        });
+        state.map.addLayer({ 
+            id: 'service-network', 
+            type: 'line', 
+            source: 'service-network', 
+            paint: { 
+                'line-color': '#f59e0b', 
+                'line-width': 3, 
+                'line-opacity': 0.6 
+            } 
+        });
+    }    
 
     // Red polygon fill (the catchment area)
-    state.map.addSource('service-hull', { 
-        type: 'geojson', 
-        data: data.service_area 
-    });
-    state.map.addLayer({ 
-        id: 'service-hull', 
-        type: 'fill', 
-        source: 'service-hull', 
-        paint: { 
-            'fill-color': '#dc2626', 
-            'fill-opacity': 0.15 
-        } 
-    });
-
-    // Red dashed border around the polygon
-    state.map.addLayer({ 
-        id: 'service-border', 
-        type: 'line', 
-        source: 'service-hull', 
-        paint: { 
-            'line-color': '#dc2626', 
-            'line-width': 4, 
-            'line-dasharray': [3, 2], 
-            'line-opacity': 0.8 
-        } 
-    });
-}
-
-// ============================================================================
-// SECTION 13: SEARCH FUNCTIONALITY (Elasticsearch)
-// ============================================================================
-// Search for building units or floors by name/address.
-// Results appear in the sidebar; clicking one zooms to it in 3D and highlights it.
-
-/**
- * Execute a search against the Elasticsearch index.
- * Uses "multi_match" so it searches several fields at once,
- * and "fuzziness: AUTO" to tolerate minor typos.
- */
-async function searchUnits() {
-    const queryText = document.getElementById('searchInput').value.trim();
-    const resultsDiv = document.getElementById('results');
-
-    // Validate input
-    if (!queryText) {
-        resultsDiv.innerHTML = '<div class="no-results">Please enter a search term</div>';
-        return;
-    }
-
-    resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
-    clearHighlight();
-
-    // Choose the right index and fields based on the selected dataset radio button
-    const index = currentDataset === 'units' ? 'building_units' : 'buildings_vertical';
-    
-    // Define which fields to search (with boost values)
-    const fields = currentDataset === 'units'
-        ? ['properties.UNIT_ID', 'properties.NAME^2', 'properties.NAME_LONG', 'properties.UnitAddres', 'properties.LabelNames']
-        : ['properties.UnitAddress^3', 'properties.ShortAddress^1.8', 'properties.fkFloorID^1.5', 'properties.FloorUsage'];
-
-    // Build Elasticsearch query
-    const esQuery = { 
-        query: { 
-            multi_match: { 
-                query: queryText, 
-                fields, 
-                type: 'best_fields', 
-                fuzziness: 'AUTO'  // Tolerate up to 2 character differences
+    if (data.service_area) {
+        state.map.addSource('service-hull', { 
+            type: 'geojson', 
+            data: data.service_area 
+        });
+        state.map.addLayer({ 
+            id: 'service-hull', 
+            type: 'fill', 
+            source: 'service-hull', 
+            paint: { 
+                'fill-color': '#dc2626', 
+                'fill-opacity': 0.15 
             } 
-        }, 
-        size: 20 // Return at most 20 results
-    };
-
-    try {
-        // Execute search
-        const response = await fetch(`${ES_URL}/${index}/_search`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(esQuery)
         });
 
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        resultsDiv.innerHTML = '';
-
-        // Check for results
-        if (data.hits.hits.length === 0) {
-            resultsDiv.innerHTML = '<div class="no-results">No results found.</div>';
-            return;
-        }
-
-        // Render each result as a clickable list item
-        data.hits.hits.forEach(hit => {
-            const feature = hit._source;
-            const props = feature.properties || feature; // Support both new (nested) and old (flat) structures
-            const item = document.createElement('div');
-            item.className = 'result-item';
-
-            // Format based on dataset type
-            if (currentDataset === 'units') {
-                item.innerHTML = `
-                    <strong>${props.UNIT_ID || 'N/A'}</strong><br>
-                    ${props.LabelNames || 'Unnamed'} (${props.UnitAddres || 'No address'})<br>
-                    <small>Floor Height: ${props.Base !== undefined ? props.Base.toFixed(2) + 'm' : 'N/A'} | Type: ${props.USE_TYPE || 'N/A'}</small>
-                `;
-            } else {
-                item.innerHTML = `
-                    <strong>${props.UnitAddress || props.fkFloorID || '—'}</strong><br>
-                    Floor ${props.FloorNumber ?? '—'} – ${props.FloorUsage || '—'}<br>
-                    <small>Address: ${props.UnitAddress || props.ShortAddress || 'No address'} | Building: ${props.BuildingHeight ? props.BuildingHeight.toFixed(1) + 'm' : '—'}</small>
-                `;
-            }
-
-            // Add click handler to zoom to feature
-            item.onclick = () => zoomToFeature(feature, item); // Pass original feature
-            resultsDiv.appendChild(item);
+        // Red dashed border around the polygon
+        state.map.addLayer({ 
+            id: 'service-border', 
+            type: 'line', 
+            source: 'service-hull', 
+            paint: { 
+                'line-color': '#dc2626', 
+                'line-width': 4, 
+                'line-dasharray': [3, 2], 
+                'line-opacity': 0.8 
+            } 
         });
-
-    } catch (err) {
-        console.error('Search error:', err);
-        resultsDiv.innerHTML = `<div class="error">Error: ${err.message}<br><small>Check console for details</small></div>`;
-    }
-}
-
-/**
- * Calculate where to place the info popup relative to a feature's bounding box.
- * Positions it slightly to the right of and above the feature's center.
- *
- * @param {Object} bounds - MapLibre LngLatBounds of the feature
- * @returns {Array} [lng, lat] for the popup anchor
- */
-function getPopupAnchorPosition(bounds) {
-    const ne = bounds.getNorthEast();
-    const sw = bounds.getSouthWest();
-    // Place the popup 30% to the right and 65% up from the bottom of the bounding box
-    return [
-        ne.lng + (ne.lng - sw.lng) * 0.3,  // 30% to the right
-        sw.lat + (ne.lat - sw.lat) * 0.65  // 65% up from bottom
-    ];
-}
-
-/**
- * Zoom to a search result, switch to 3D BDF view, and highlight the feature.
- *
- * @param {Object} feature      - The Elasticsearch document (_source)
- * @param {HTMLElement} clickedElement - The result list item that was clicked
- */
-async function zoomToFeature(feature, clickedElement) {
-    if (!state.map) {
-        console.warn('Map not ready');
-        return;
-    }
-
-    // Clear previous highlights and mark new selection
-    clearHighlight();
-    clickedElement.classList.add('active');
-
-    // Support both old flat and new nested structure
-    const props = feature.properties || feature;
-    const geometry = feature.geometry || (feature.properties && feature.properties.geometry);
-    // Validate geometry
-    if (!feature.geometry) {
-        alert('No geometry available for this feature.');
-        return;
-    }
-
-    // Calculate feature bounds
-    const bounds = new maplibregl.LngLatBounds();
-    const flattenCoords = (arr) => {
-        if (typeof arr[0] === 'number') {
-            bounds.extend([arr[0], arr[1]]);
-        } else {
-            arr.forEach(flattenCoords);
-        }
-    };
-    flattenCoords(geometry.coordinates);
-    
-    if (bounds.isEmpty()) {
-        alert('No valid geometry found.');
-        return;
-    }
-
-    // Calculate popup position
-    const popupPosition = getPopupAnchorPosition(bounds);
-
-    // Build the popup HTML with the feature's attributes
-    let popupHTML = `
-        <div style="max-width:280px;font-size:14px;line-height:1.6;">
-            <strong style="font-size:16px;color:#1f2937;">
-                ${props.NAME || props.FloorUsage || props.UnitAddress || 'Feature'}
-            </strong><br>
-    `;
-
-    if (currentDataset === 'units') {
-        popupHTML += `
-            <strong>Unit ID:</strong> ${props.UNIT_ID || '—'}<br>
-            <strong>Address:</strong> ${props.UnitAddres || 'N/A'}<br>
-            <strong>Floor Height:</strong> ${props.Base !== undefined ? props.Base.toFixed(2) + 'm' : 'N/A'}<br>
-            <strong>Height:</strong> ${props.HEIGHT !== undefined ? props.HEIGHT.toFixed(2) + 'm' : 'N/A'}<br>
-            <strong>Type:</strong> ${props.USE_TYPE || 'N/A'}
-        `;
-    } else {
-        popupHTML += `
-            <strong>ID:</strong> ${props.fkFloorID || props.UnitAddress || '—'}<br>
-            <strong>Address:</strong> ${props.UnitAddress || props.ShortAddress || 'N/A'}<br>
-            <strong>Floor:</strong> ${props.FloorNumber ?? '—'}<br>
-            <strong>Usage:</strong> ${props.FloorUsage || '—'}<br>
-            <strong>Total Floors:</strong> ${props.NoofFloors || '—'}<br>
-            <strong>Building Height:</strong> ${props.BuildingHeight ? props.BuildingHeight.toFixed(1) + 'm' : '—'}
-        `;
-    }
-    popupHTML += '</div>';
-
-    // Function to add highlight and animate camera
-    const afterStyleLoad = () => {
-        addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML);
-    };
-
-    // Switch to 3D BDF style if not already active
-    const bdfStyle = STYLES.find(s => s.id === 'bdf-style');
-    if (currentStyleId !== 'bdf-style') {
-        state.map.setStyle(bdfStyle.url);
-        currentStyleId = 'bdf-style';
-        state.map.once('idle', afterStyleLoad);
-    } else {
-        afterStyleLoad();
-    }
-}
-
-/**
- * Add a 3D orange extrusion highlight and animate the camera to the feature.
- *
- * @param {Object} feature        - Elasticsearch document
- * @param {Object} bounds         - LngLatBounds of the feature
- * @param {Array}  popupPosition  - [lng, lat] for the popup
- * @param {string} popupHTML      - HTML content for the popup
- */
-function addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML) {
-    // Get layer ordering
-    if (!state.map) return;
-
-    const props = feature.properties || feature;
-    const geometry = feature.geometry || (feature.properties && feature.properties.geometry);
-    if (!geometry) {
-        console.warn('No geometry found for highlighting');
-        return;
-    }
-    const layers = state.map.getStyle().layers || [];
-    const beforeId = layers.length > 0 ? layers[layers.length - 1].id : undefined;
-    
-    // Create a safe CSS/MapLibre ID from the feature's identifier
-    const safeId = (props.UNIT_ID || props.fkFloorID || props.UnitAddress || 'feat')
-        .replace(/[^a-z0-9]/gi, '-');
-    const id = `highlight-${safeId}`;
-
-    // Track for cleanup
-    currentHighlightIds.push(id);
-    
-    // Add GeoJSON source for highlighting
-    state.map.addSource(id, { 
-        type: 'geojson', 
-        data: { 
-            type: 'Feature', 
-            geometry: geometry,
-            properties: { ...props }
-        } 
-    });
-
-    // Calculate extrusion heights based on dataset
-    let extrusionBase = 0;
-    let extrusionHeight = 4;
-    if (currentDataset === 'units') {
-        // Units: use Base and HEIGHT properties
-        extrusionBase = props.Base || 0;
-        extrusionHeight = extrusionBase + (props.HEIGHT || 4.25);
-    } else {
-        // Floors: calculate from building height and floor number
-        const floorH = (props.BuildingHeight || 0) / (props.NoofFloors || 1);
-        extrusionBase = floorH * (props.FloorNumber || 0);
-        extrusionHeight = extrusionBase + floorH;
-    }
-
-    // Add the 3D extruded polygon in orange
-    state.map.addLayer({
-        id, 
-        type: 'fill-extrusion', 
-        source: id,
-        paint: { 
-            'fill-extrusion-color': '#ff5c00',      // Orange highlight
-            'fill-extrusion-opacity': 0.95, 
-            'fill-extrusion-height': ['+', extrusionHeight, 1],  // Slightly above
-            'fill-extrusion-base': extrusionBase 
-        }
-    }, beforeId);
-
-    // Animate camera to feature
-    state.map.fitBounds(bounds, { 
-        padding: { 
-            top: 100, 
-            bottom: 100, 
-            left: 420,  // Extra padding for search panel
-            right: 100 
-        }, 
-        pitch: 60,          // Tilted view
-        bearing: -18,       // Slight rotation
-        minZoom: 16, 
-        maxZoom: 19.5, 
-        duration: 1600, 
-        essential: true 
-    });
-
-    // Show the popup 0.8 seconds after the camera animation starts
-    setTimeout(() => {
-        currentPopup = new maplibregl.Popup({ 
-            offset: [15, 0], 
-            closeButton: true, 
-            className: 'unit-popup', 
-            maxWidth: '300px', 
-            anchor: 'left' 
-        })
-            .setLngLat(popupPosition)
-            .setHTML(popupHTML)
-            .addTo(state.map);
-        
-        currentPopup.on('close', () => {
-            currentPopup = null;
-        });
-    }, 800);
+    }    
 }
 
 // ============================================================================
-// SECTION 14: UTILITY FUNCTIONS
+// SECTION 13: UTILITY FUNCTIONS
 // ============================================================================
-// Small reusable helpers used throughout the application.
 
 /**
  * Fetch a URL with an automatic timeout.
  * If the server doesn't respond within REQUEST_TIMEOUT milliseconds,
  * the request is cancelled and an error is thrown.
- *
+ * Surfaces the HTTP status text so error messages say
+ * "404 Not Found" or "422 Unprocessable Entity" instead of just "Server error: 404".
  * @param {string} url     - The URL to fetch
  * @param {Object} options - Standard fetch() options (method, headers, body, etc.)
  * @returns {Promise<Object>} Parsed JSON response
@@ -2130,19 +1685,22 @@ async function fetchWithTimeout(url, options = {}) {
         });
         
         clearTimeout(timeoutId);
-        
+
         if (!response.ok) {
-            throw new Error(`Server error: ${response.status} ${response.statusText}`);
+            // Try to read the error detail from the JSON body (FastAPI provides this)
+            let detail = `${response.status} ${response.statusText}`;
+            try {
+                const body = await response.json();
+                if (body.detail) detail = body.detail;
+            } catch { /* body wasn't JSON — use the status text */ }
+            throw new Error(detail);
         }
-        
+
         return await response.json();
-        
+
     } catch (error) {
         clearTimeout(timeoutId);
-        
-        if (error.name === 'AbortError') {
-            throw new Error('Request timed out. Please try again.');
-        }
+        if (error.name === 'AbortError') throw new Error('Request timed out. Please try again.');
         throw error;
     }
 }
@@ -2261,6 +1819,121 @@ function fitToFeatures(data) {
     });
 }
 
+/**
+ * Handles the mouse down event on the map.
+ * @param {MouseEvent} e - The mouse event object
+ * @returns {void}
+ */
+
+function onMapMouseDown(e) {
+    // Only trigger grab cursor for middle-click or right-click, or when dragging the map (not placing markers)
+    // MapLibre uses left-click drag for panning
+    const mapContainer = document.getElementById('map');
+    if (!mapContainer) return;
+    mapContainer.classList.add('map-info');
+
+    const onMouseMove = () => {
+        mapContainer.classList.remove('map-info');
+        mapContainer.classList.add('map-panning');
+    };
+
+    document.addEventListener('mousemove', onMouseMove, { once: true });
+
+    document.addEventListener('mouseup', () => {
+        mapContainer.classList.remove('map-info', 'map-panning');
+        document.removeEventListener('mousemove', onMouseMove);
+    }, { once: true });
+}
+
+/**
+ * Handles the mouse up event on the map.
+ * @returns {void}
+ */
+
+function onMapMouseUp() {
+    const mapContainer = document.getElementById('map');
+    if (mapContainer) {
+        mapContainer.classList.remove('map-info', 'map-panning');
+    }
+}
+// ============================================================================
+// SECTION 14: RESTORE FUNCTIONS (after map style switch)
+// ============================================================================
+// Each function redraws one mode's data after a style switch.
+// They read from the saved state (lastRouteData, lastFacilityData, etc.)
+// so no new API calls are needed.
+
+/** Redraw A→B route(s) after a style switch */
+function restoreRouteLayers() {
+    if (!Array.isArray(state.lastRouteData)) return;
+    state.lastRouteData.forEach((route, i) => {
+        addRouteLayer(route, ROUTE_COLORS[i] || '#5e8bbe', i === 0 ? 0.9 : 0.6, i === 0 ? 7 : 5, `route-${i}`);
+    });
+}
+
+/**
+ * Redraw TSP route segments + re-create waypoint markers after map style change.
+ * Each segment keeps its original color based on the starting waypoint.
+ */
+function restoreTSPRoute() {
+    if (!state.lastTSPRouteData) return;
+
+    const { segments, waypoint_order } = state.lastTSPRouteData;
+
+    // Aggressive cleanup of old TSP layers (prevents "source already exists" errors)
+    for (let i = 0; i < 50; i++) {
+        const id = `tsp-segment-${i}`;
+        if (state.map.getLayer(id)) state.map.removeLayer(id);
+        if (state.map.getSource(id)) state.map.removeSource(id);
+    }
+ 
+    // MapLibre can fire 'idle' before map.isStyleLoaded() is true in some
+    // versions (particularly when switching between raster/vector styles).
+    // addRouteLayer → addSource/addLayer will throw "style not loaded" and
+    // the error is caught silently by the outer try/catch in switchMapStyle,
+    // leaving the map blank.  Guard with isStyleLoaded() and retry on the
+    // next styledata event if needed.
+
+    if (!state.map.isStyleLoaded()) {
+        state.map.once('styledata', () => restoreTSPRoute());
+        return;
+    }
+ 
+    // Re-draw all leg segments with the correct colors.
+    drawTSPSegments(segments, waypoint_order);
+    // NOTE: TSP markers are DOM elements — they survive style switches automatically.
+
+}
+
+/**
+ *After a style switch, only rebuild the ROUTE LAYERS.
+* We do NOT touch the facility markers because MapLibre keeps them intact across style changes.
+* If we tried to rebuild markers here, we'd have to re-create new Marker objects and add them to the map,
+ * all the markers again, creating invisible duplicate markers that can never
+ * be removed by clearFacilityData().
+ *
+ * MapLibre Marker objects are attached to the map's container <div>, not to
+ * the style, so they survive style switches without any intervention.
+ */
+function restoreFacilityData() {
+    if (!state.lastFacilityData || !state.markers.facility) return;
+
+    const facilityType = document.getElementById('facility-type-select')?.value || 'hospital';
+
+    // Remove any leftover facility layers before we add new ones
+    removeFacilityLayers();
+
+    // Re-draw all facility result markers and their route lines
+    rebuildFacilityRouteLayers(state.lastFacilityData, facilityType);
+}
+
+/** Redraw service area polygon + road network after a style switch */
+function restoreServiceArea() {
+    if (!state.lastServiceData || !state.markers.service) return;
+    drawServiceArea(state.lastServiceData);
+}
+
+
 // ============================================================================
 // SECTION 15: CLEANUP FUNCTIONS
 // ============================================================================
@@ -2272,18 +1945,16 @@ function fitToFeatures(data) {
 function clearRouteLayers() {
     // Remove alternative route layers (support up to 20 alternatives)
     for (let i = 0; i < 20; i++) {
-        const layerId = `route-${i}`;
-        if (state.map.getLayer(layerId)) state.map.removeLayer(layerId);
-        if (state.map.getSource(layerId)) state.map.removeSource(layerId);
+        const id = `route-${i}`;
+        if (state.map.getLayer(id))  state.map.removeLayer(id);
+        if (state.map.getSource(id)) state.map.removeSource(id);
     }
     
     // Remove old single route layer (backward compatibility)
-    if (state.map.getLayer('route')) state.map.removeLayer('route');
+    if (state.map.getLayer('route'))  state.map.removeLayer('route');
     if (state.map.getSource('route')) state.map.removeSource('route');
-
-    state.currentRouteData = null;
+    state.lastRouteData = null;
 }
-
 
 /**
  * Remove all TSP route segment layers from the map.
@@ -2321,25 +1992,27 @@ function clearFacilityData() {
 }
 
 /**
- * Clear service area visualization
- * Removes service area polygon and network layers
+ * Clear service area visualization - ALWAYS remove layers BEFORE sources
  */
 function clearServiceArea() {
-    ['service-network', 'service-hull', 'service-border'].forEach(id => {
+    if (!state.map) return;
+    // Remove layers BEFORE sources (MapLibre enforces this order)
+    ['service-border', 'service-hull', 'service-network'].forEach(id => {
         if (state.map.getLayer(id)) state.map.removeLayer(id);
+    });
+    // Then remove sources
+    ['service-hull', 'service-network'].forEach(id => {
         if (state.map.getSource(id)) state.map.removeSource(id);
     });
 }
-
 /**
  * Remove 3D search result highlights and close any open popup.
  */
 function clearHighlight() {
-    if (!state.map) return;
     // Remove all highlight layers
     currentHighlightIds.forEach(id => {
-        if (state.map.getLayer(id)) state.map.removeLayer(id);
-        if (state.map.getSource(id)) state.map.removeSource(id);
+        if (state.map?.getLayer(id)) state.map.removeLayer(id);
+        if (state.map?.getSource(id)) state.map.removeSource(id);
     });
     currentHighlightIds = [];
 
@@ -2376,14 +2049,13 @@ function clearAll() {
             state.markers.tsp.forEach(item => item.marker?.remove());
             state.markers.tsp = [];
         } else if (state.markers[key]) {
-            // Single markers
             state.markers[key].remove();
             state.markers[key] = null;
         }
     });
 
     // Reset all saved API response data
-    state.currentRouteData = null;
+    state.lastRouteData = null;
     state.lastTSPRouteData = null;
     state.lastFacilityData = null;
     state.lastServiceData  = null;
@@ -2393,7 +2065,311 @@ function clearAll() {
 }
 
 // ============================================================================
-// SECTION 16: APPLICATION INITIALIZATION
+// SECTION 16: SEARCH FUNCTIONALITY (Elasticsearch)
+// ============================================================================
+// Search for building units or floors by name/address.
+// Results appear in the sidebar; clicking one zooms to it in 3D and highlights it.
+
+/**
+ * Execute a search against the Elasticsearch index.
+ * Uses "multi_match" so it searches several fields at once,
+ * and "fuzziness: AUTO" to tolerate minor typos.
+ */
+async function searchUnits() {
+    const queryText = document.getElementById('searchInput').value.trim();
+    const resultsDiv = document.getElementById('results');
+
+    // Validate input
+    if (!queryText) {
+        resultsDiv.innerHTML = '<div class="no-results">Please enter a search term</div>';
+        return;
+    }
+
+    resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
+    clearHighlight();
+
+    // Choose the right index and fields based on the selected dataset radio button
+    const index = currentDataset === 'units' ? 'building_units' : 'buildings_vertical';
+    
+    // Define which fields to search (with boost values)
+    const fields = currentDataset === 'units'
+        ? ['properties.UNIT_ID', 'properties.NAME^2', 'properties.NAME_LONG', 'properties.UnitAddres', 'properties.LabelNames']
+        : ['properties.UnitAddress^3', 'properties.ShortAddress^1.8', 'properties.fkFloorID^1.5', 'properties.FloorUsage'];
+
+    // Build Elasticsearch query
+    const esQuery = { 
+        query: { 
+            multi_match: { 
+                query: queryText, 
+                fields, 
+                type: 'best_fields', 
+                fuzziness: 'AUTO'  // Tolerate up to 2 character differences
+            } 
+        }, 
+        size: 20 // Return at most 20 results
+    };
+
+    try {
+        // Execute search
+        const response = await fetch(`${ES_URL}/${index}/_search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(esQuery)
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        resultsDiv.innerHTML = '';
+
+        // Check for results
+        if (data.hits.hits.length === 0) {
+            resultsDiv.innerHTML = '<div class="no-results">No results found.</div>';
+            return;
+        }
+
+        // Render each result as a clickable list item
+        data.hits.hits.forEach(hit => {
+            const feature = hit._source;
+            const props = feature.properties || {};
+            const item = document.createElement('div');
+            item.className = 'result-item';
+
+            // Format based on dataset type
+            if (currentDataset === 'units') {
+                item.innerHTML = `
+                    <strong>${props.UNIT_ID || 'N/A'}</strong><br>
+                    ${props.LabelNames || 'Unnamed'} (${props.UnitAddres || 'No address'})<br>
+                    <small>Floor Height: ${props.Base !== undefined ? props.Base.toFixed(2) + 'm' : 'N/A'} | Type: ${props.USE_TYPE || 'N/A'}</small>
+                `;
+            } else {
+                item.innerHTML = `
+                    <strong>${props.UnitAddress || props.fkFloorID || '—'}</strong><br>
+                    Floor ${props.FloorNumber ?? '—'} – ${props.FloorUsage || '—'}<br>
+                    <small>Address: ${props.UnitAddress || props.ShortAddress || 'No address'} | Building: ${props.BuildingHeight ? props.BuildingHeight.toFixed(1) + 'm' : '—'}</small>
+                `;
+            }
+
+            // Add click handler to zoom to feature
+            item.onclick = () => zoomToFeature(feature, item);
+            resultsDiv.appendChild(item);
+        });
+
+    } catch (err) {
+        console.error('Search error:', err);
+        resultsDiv.innerHTML = `<div class="error">Error: ${err.message}<br><small>Check console for details</small></div>`;
+    }
+}
+
+/**
+ * Calculate where to place the info popup relative to a feature's bounding box.
+ * Positions it slightly to the right of and above the feature's center.
+ *
+ * @param {Object} bounds - MapLibre LngLatBounds of the feature
+ * @returns {Array} [lng, lat] for the popup anchor
+ */
+function getPopupAnchorPosition(bounds) {
+    const ne = bounds.getNorthEast();
+    const sw = bounds.getSouthWest();
+    // Place the popup 30% to the right and 65% up from the bottom of the bounding box
+    return [
+        ne.lng + (ne.lng - sw.lng) * 0.3,  // 30% to the right
+        sw.lat + (ne.lat - sw.lat) * 0.65  // 65% up from bottom
+    ];
+}
+
+/**
+ * Zoom to a search result, switch to 3D BDF view, and highlight the feature.
+ *
+ * @param {Object} feature      - The Elasticsearch document (_source)
+ * @param {HTMLElement} clickedElement - The result list item that was clicked
+ */
+async function zoomToFeature(feature, clickedElement) {
+    if (!state.map) {
+        console.warn('Map not ready');
+        return;
+    }
+
+    // Clear previous highlights and mark new selection
+    clearHighlight();
+    clickedElement.classList.add('active');
+
+    // Validate geometry
+    if (!feature.geometry) {
+        alert('No geometry available for this feature.');
+        return;
+    }
+
+    // Calculate feature bounds
+    const bounds = new maplibregl.LngLatBounds();
+    const props = feature.properties || {};
+    const flattenCoords = (arr) => {
+        if (typeof arr[0] === 'number') {
+            bounds.extend([arr[0], arr[1]]);
+        } else {
+            arr.forEach(flattenCoords);
+        }
+    };
+    flattenCoords(feature.geometry.coordinates);
+    
+    if (bounds.isEmpty()) {
+        alert('No valid geometry found.');
+        return;
+    }
+
+    // Calculate popup position
+    const popupPosition = getPopupAnchorPosition(bounds);
+
+    // Build the popup HTML with the feature's attributes
+    let popupHTML = `
+        <div style="max-width:280px;font-size:14px;line-height:1.6;">
+            <strong style="font-size:16px;color:#1f2937;">
+                ${props.NAME || props.FloorUsage || props.UnitAddress || 'Feature'}
+            </strong><br>
+    `;
+
+    if (currentDataset === 'units') {
+        popupHTML += `
+            <strong>Unit ID:</strong> ${props.UNIT_ID || '—'}<br>
+            <strong>Address:</strong> ${props.UnitAddres || 'N/A'}<br>
+            <strong>Floor:</strong> ${props.Base !== undefined ? props.Base.toFixed(2) + 'm' : 'N/A'}<br>
+            <strong>Height:</strong> ${props.HEIGHT !== undefined ? props.HEIGHT.toFixed(2) + 'm' : 'N/A'}<br>
+            <strong>Type:</strong> ${props.USE_TYPE || 'N/A'}
+        `;
+    } else {
+        popupHTML += `
+            <strong>ID:</strong> ${props.fkFloorID || props.UnitAddress || '—'}<br>
+            <strong>Address:</strong> ${props.UnitAddress || props.ShortAddress || 'N/A'}<br>
+            <strong>Floor:</strong> ${props.FloorNumber ?? '—'}<br>
+            <strong>Usage:</strong> ${props.FloorUsage || '—'}<br>
+            <strong>Total Floors:</strong> ${props.NoofFloors || '—'}<br>
+            <strong>Building Height:</strong> ${props.BuildingHeight ? props.BuildingHeight.toFixed(1) + 'm' : '—'}
+        `;
+    }
+    popupHTML += '</div>';
+
+    // Function to add highlight and animate camera
+    const afterStyleLoad = () => {
+        addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML);
+    };
+
+    // Switch to 3D BDF style if not already active
+    const bdfStyle = STYLES.find(s => s.id === 'bdf-style');
+    if (currentStyleId !== 'bdf-style') {
+        state.map.setStyle(bdfStyle.url);
+        currentStyleId = 'bdf-style';
+        state.map.once('idle', afterStyleLoad);
+    } else {
+        afterStyleLoad();
+    }
+}
+
+/**
+ * Add a 3D orange extrusion highlight and animate the camera to the feature.
+ *
+ * @param {Object} feature        - Elasticsearch document
+ * @param {Object} bounds         - LngLatBounds of the feature
+ * @param {Array}  popupPosition  - [lng, lat] for the popup
+ * @param {string} popupHTML      - HTML content for the popup
+ */
+function addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML) {
+    // Get layer ordering
+    const layers = state.map.getStyle().layers || [];
+
+    // Find the first layer that should sit ABOVE our highlight.
+    // We want the highlight to render on top of all fill-extrusion layers
+    // (including "SPL Vertical") but below UI overlays like labels/symbols.
+    const firstSymbolLayer = layers.find(l => l.type === 'symbol')?.id;
+    // If no symbol layer exists, append to the very top (undefined = on top)
+    const beforeId = firstSymbolLayer ?? undefined;
+    const props = feature.properties || {};
+    
+    // Create a safe CSS/MapLibre ID from the feature's identifier
+    const safeId = (props.UNIT_ID || props.fkFloorID || props.UnitAddress || 'feat')
+        .replace(/[^a-z0-9]/gi, '-');
+    const id = `highlight-${safeId}`;
+
+    // Track for cleanup
+    currentHighlightIds.push(id);
+
+    // Remove existing layer/source with this ID if present (prevents "already exists" error)
+    if (state.map.getSource(id)) state.map.removeSource(id);
+    
+    // Add the feature as a GeoJSON source
+    state.map.addSource(id, { 
+        type: 'geojson', 
+        data: { 
+            type: 'Feature', 
+            geometry: feature.geometry, 
+            properties: { ...feature } 
+        } 
+    });
+
+    // Calculate extrusion heights based on dataset
+    let extrusionBase, extrusionHeight;
+    if (currentDataset === 'units') {
+        // Units: use Base and HEIGHT properties
+        extrusionBase = props.Base || 0;
+        extrusionHeight = extrusionBase + (props.HEIGHT || 4.25);
+    } else {
+        // Floors: calculate from building height and floor number
+        const floorH = (props.BuildingHeight || 0) / (props.NoofFloors || 1);
+        extrusionBase = floorH * (props.FloorNumber || 0);
+        extrusionHeight = extrusionBase + floorH;
+    }
+
+    // Add the 3D extruded polygon in orange
+    state.map.addLayer({
+        id, 
+        type: 'fill-extrusion', 
+        source: id,
+        paint: { 
+            'fill-extrusion-color': '#ff5c00',      // Orange highlight
+            'fill-extrusion-opacity': 0.95, 
+            'fill-extrusion-height': extrusionHeight,  // flat value, not expression
+            'fill-extrusion-base': extrusionBase 
+        }
+    }, beforeId); // inserted just before the first symbol/label layer
+
+    // Animate camera to feature
+    state.map.fitBounds(bounds, { 
+        padding: { 
+            top: 100, 
+            bottom: 100, 
+            left: 420,  // Extra padding for search panel
+            right: 100 
+        }, 
+        pitch: 60,          // Tilted view
+        bearing: -18,       // Slight rotation
+        minZoom: 16, 
+        maxZoom: 19.5, 
+        duration: 1600, 
+        essential: true 
+    });
+
+    // Show the popup 0.8 seconds after the camera animation starts
+    setTimeout(() => {
+        currentPopup = new maplibregl.Popup({ 
+            offset: [15, 0], 
+            closeButton: true, 
+            className: 'unit-popup', 
+            maxWidth: '300px', 
+            anchor: 'left' 
+        })
+            .setLngLat(popupPosition)
+            .setHTML(popupHTML)
+            .addTo(state.map);
+        
+        currentPopup.on('close', () => {
+            currentPopup = null;
+        });
+    }, 800);
+}
+
+// ============================================================================
+// SECTION 17: APPLICATION INITIALIZATION
 // ============================================================================
 // Start the application when page loads
 
