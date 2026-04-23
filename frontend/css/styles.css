@@ -246,15 +246,15 @@ body {
 
 /* Facility markers */
 .facility-marker {
-    width: 48px;
-    height: 48px;
+    width: 38px;
+    height: 38px;
     background: #6366f1;           /* default color - will be overridden */
     border: 3px solid white;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 24px;
+    font-size: 18px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     cursor: pointer;
     box-sizing: border-box;
@@ -550,6 +550,7 @@ body {
 #custom-map-controls {
     display: flex;
     flex-direction: column;
+    margin-top: 8px; /* spacing from navigation control */
 }
 
 /* Shared base for both map-control buttons */
@@ -670,6 +671,11 @@ body {
 }
 
 .search-panel * { pointer-events: auto; }
+
+/* Pill is only used on mobile — hidden on desktop */
+.search-panel-pill {
+    display: none;
+}
 
 /* Dataset radio buttons */
 .dataset-selector {
@@ -880,7 +886,9 @@ body {
 /* ==========================================================================
    RESPONSIVE ADJUSTMENTS
    ========================================================================== */
+
 @media (max-width: 600px) {
+    /* General mobile adjustments */
     .title {
         font-size: 1.1rem;
     }
@@ -891,9 +899,14 @@ body {
     }
     
     .mode-btn {
-        padding: 0.55rem 1rem;
-        font-size: 0.85rem;
-        min-width: 100px;
+        min-width: 80px;
+        padding: 0.5rem 0.6rem;
+        font-size: 0.78rem;
+    }
+
+    .mode-switcher {
+        gap: 0.25rem;
+        padding: 0.35rem;
     }
     
     .control-panel {
@@ -933,7 +946,7 @@ body {
     #time-value {
         font-size: 1rem;
     }
-    
+
     /* Feature info panel adjustments */
     .control-panel.feature-info-panel {
         min-width: 280px;
@@ -941,27 +954,105 @@ body {
         right: 1rem;
     }
 
-    .search-panel {
-        width: calc(100vw - 20px);
-        left: 10px;
-        right: 10px;
-        max-height: calc(100vh - 20px);
+        /* ── Control panel: move to RIGHT side on mobile ── */
+    .control-panel.header {
+        left: auto !important;
+        right: 12px !important;
+        transform: none !important;
+        min-width: unset;
+        width: auto;
+        /*max-width: calc(50vw - 16px);  /* cap at half viewport so it never touches search panel */
     }
 
+    .control-panel.header.panel-minimised {
+        left: auto !important;
+        right: 12px !important;
+        transform: none !important;
+        width: auto;
+    }
+
+    /* Dataset selector */
     .dataset-selector {
         flex-direction: column;
         gap: 8px;
     }
 
-    .results-list {
-        max-height: 180px;
+    /* ==================== PHONE MODE SPECIFIC CHANGES ==================== */
+
+    /* 1. Move NavigationControl + custom buttons to bottom-right */
+    .maplibregl-ctrl-top-right {
+        top: auto !important;
+        bottom: 12px !important;
+        right: 12px !important;
+        left: auto !important;
     }
 
-    #info-box {
-        max-height: 160px;
+    /* Extra spacing between NavigationControl and our custom buttons */
+    #custom-map-controls {
+        margin-top: 8px;
+    }
+
+    /* 2. Search panel - Minimized by default on phone */
+    /* 2. Search panel - Minimized by default on phone */
+    .search-panel {
+        top: 12px;
+        left: 12px;
+        right: auto;
+        width: auto;
+        max-height: 44px;
+        overflow: hidden;
+        transition: max-height 0.35s ease;
+        border-radius: 8px;
+        padding: 0;
+        cursor: pointer;
+    }
+
+    /* Minimized pill — the only thing visible when collapsed */
+    .search-panel-pill {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        font-size: 14px;
+        font-weight: 500;
+        color: #374151;
+        white-space: nowrap;
+        user-select: none;
+    }
+
+    .search-panel-pill .pill-icon {
+        font-size: 15px;
+        line-height: 1;
+    }
+
+    /* Expanded state */
+    .search-panel.expanded {
+        max-height: 70vh;
+        padding: 16px;
+        cursor: default;
+        width: calc(100vw - 24px);
+    }
+
+    /* Hide the pill when expanded */
+    .search-panel.expanded .search-panel-pill {
+        display: none;
+    }
+
+    /* Show the real content only when expanded */
+    .search-panel:not(.expanded) .dataset-selector,
+    .search-panel:not(.expanded) .search-bar,
+    .search-panel:not(.expanded) .results-list,
+    .search-panel:not(.expanded) #info-box {
+        display: none !important;
+    }
+
+    .search-panel.expanded .results-list {
+        max-height: 40vh;
+        overflow-y: auto;
     }
 }
 
+/* Extra small phones */
 @media (max-width: 400px) {
     .control-panel {
         min-width: 280px;
@@ -982,5 +1073,13 @@ body {
 
     .sliders-row {
         gap: 0.75rem;
+    }
+
+    .search-panel {
+        max-height: 54px;   /* even tighter on very small screens */
+    }
+
+    .search-panel.expanded {
+        max-height: 48vh;
     }
 }

@@ -570,7 +570,7 @@
             ["get", "HEIGHT"]
         ],
         "fill-extrusion-base": ["get", "Base"],
-        "fill-extrusion-opacity": 0.8,
+        "fill-extrusion-opacity": 0.0,
         "fill-extrusion-color": [
             "match",
             ["get", "LEVEL_ID"],
@@ -612,7 +612,7 @@
             ],
             ["get", "FloorNumber"]
           ],
-        "fill-extrusion-opacity": 0.0,
+        "fill-extrusion-opacity": 0.7,
         "fill-extrusion-color": [
             "match",
             ["to-number", ["get", "FloorNumber"]],

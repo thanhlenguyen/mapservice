@@ -57,7 +57,7 @@
       "mbtiles": "address_layer.mbtiles"
     },
     "street_centerline": {
-      "mbtiles": "street_centerline.mbtiles"
+      "mbtiles": "street.mbtiles"
     }
   }
 }

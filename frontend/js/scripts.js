@@ -20,15 +20,15 @@
 // zoom   = how close/far the initial camera is
 // bearing = compass rotation (0 = north up, 45 = rotated 45 degrees clockwise)
 const STYLES = [
-    { id: 'basic-style', name: 'Default',   url: 'http://localhost:3001/styles/martin/style.json',     pitch: 0,  bearing: 0  },
-    { id: 'sat-style',   name: 'Satellite', url: 'http://localhost:3001/styles/martin/style_sat.json', pitch: 0,  bearing: 0  },
-    { id: '3d-style',    name: '3D',        url: 'http://localhost:3001/styles/martin/style_3d.json',  pitch: 45, bearing: 0  },
-    { id: 'bdf-style',   name: 'BDF',       url: 'http://localhost:3001/styles/martin/style_bdf.json', pitch: 60, bearing: -20 }
+    { id: 'basic-style', name: 'Default',   url: 'styles/martin/style.json',     pitch: 0,  bearing: 0  },
+    { id: 'sat-style',   name: 'Satellite', url: 'styles/martin/style_sat.json', pitch: 0,  bearing: 0  },
+    { id: '3d-style',    name: '3D',        url: 'styles/martin/style_3d.json',  pitch: 45, bearing: 0  },
+    { id: 'bdf-style',   name: 'BDF',       url: 'styles/martin/style_bdf.json', pitch: 60, bearing: -20 }
 ];
 
 // --- Backend API Configuration ---
 // URL endpoints for routing and analysis services
-const BACKEND_URL = 'http://localhost:5000';
+const BACKEND_URL = '/api';  // replace http://localhost:5000, because in Nginx proxies /api/ → routing-api:5000
 const API_ENDPOINTS = {
     route:           `${BACKEND_URL}/route`,             // Calculate A→B route
     tsp:             `${BACKEND_URL}/route/tsp`,          // Solve multi-point optimal route
@@ -177,8 +177,9 @@ function initMap() {
         state.currentBearing = state.map.getBearing();
     });
 
-    // Add the built-in zoom buttons and compass control (top-right corner)
-    state.map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    // Add the built-in zoom buttons and compass control base on screen size (top-right for desktop, bottom-left for mobile)
+    if (window.innerWidth <= 600) {state.map.addControl(new maplibregl.NavigationControl(), 'bottom-left');}        
+    else {state.map.addControl(new maplibregl.NavigationControl(), 'top-right');}    
 
     // Add our custom layer switcher buttons (Default / Satellite / 3D / BDF)
     state.map.addControl(createLayerSwitcher(), 'bottom-right');
@@ -186,11 +187,28 @@ function initMap() {
     // Set up the sliders (max values, initial display values)
     initializeSliders();
 
+    // Initialize the search panel
+    initializeSearchPanel()
+
     // Inject the info-pointer button and panel-toggle button into the map UI
     injectMapButtons();
 
     // Attach click/change listeners to all sidebar buttons and inputs
     setupEventHandlers();
+
+    // Handle orientation change / resize
+    window.addEventListener('resize', () => {
+        // Optional debounce if you want smoother behavior
+        setTimeout(() => {
+            const searchPanel = document.querySelector('.search-panel');
+            if (searchPanel) {
+                const shouldBeExpanded = window.innerWidth > 600;
+                if (shouldBeExpanded) {
+                    searchPanel.classList.add('expanded');
+                }
+            }
+        }, 200);
+    });
 
     // When the map finishes loading its initial tiles and style:
     state.map.on('load', () => {
@@ -310,7 +328,18 @@ function injectMapButtons() {
     // Add buttons to control group
     ctrlGroup.appendChild(infoBtn);
     ctrlGroup.appendChild(panelBtn);
-    topRight.appendChild(ctrlGroup);
+
+    // topRight.appendChild(ctrlGroup);
+    // Decide where to put the group
+    if (window.innerWidth <= 600) {
+        // Phone mode → move to bottom-right
+        const bottomLeft = document.querySelector('.maplibregl-ctrl-bottom-left') 
+                         || createBottomLeftContainer();
+        bottomLeft.appendChild(ctrlGroup);
+    } else {
+        // Desktop → keep in top-right (original behavior)
+        topRight.appendChild(ctrlGroup);
+    }
 
     /**
      * Panel Header Click Handler: When the panel is minimised, clicking anywhere on the header (except interactive elements) should expand it again.
@@ -386,6 +415,7 @@ function toggleInfoPointer() {
     const btn          = document.querySelector('.info-pointer-btn');
     const mapContainer = document.getElementById('map');
     const featurePanel = document.getElementById('feature-info-panel');
+    const panelToggleBtn = document.querySelector('.panel-toggle-btn'); 
 
     if (state.infoPointerActive) {
         setupInfoPointerLayers(); // Create the invisible highlight layers used to mark clicked features
@@ -397,7 +427,12 @@ function toggleInfoPointer() {
         clearFeatureHighlight(); // Remove any old highlight from the map
         updateFeatureInfo({ html: '<p class="info-hint">Click on any feature to see its details</p>' });
 
-            // Add grab cursor on map pan
+        // Auto-minimize the control panel
+        const controlPanel = document.querySelector('.control-panel.header');
+        if (controlPanel && !controlPanel.classList.contains('panel-minimised')) {
+            toggleControlPanel(panelToggleBtn);
+        }
+        // Add grab cursor on map pan
         state.map.on('mousedown', onMapMouseDown);
         document.addEventListener('mouseup', onMapMouseUp);
     } else {
@@ -406,6 +441,12 @@ function toggleInfoPointer() {
         mapContainer.classList.remove('info-pointer-active');
         featurePanel.classList.add('hidden');
         clearFeatureHighlight(); // Clean up
+
+        // Restore the control panel
+        // const controlPanel = document.querySelector('.control-panel.header');
+        // if (controlPanel && controlPanel.classList.contains('panel-minimised')) {
+        //     toggleControlPanel(panelToggleBtn);
+        // }
 
         // Clean up pan listeners
         state.map.off('mousedown', onMapMouseDown);
@@ -750,6 +791,47 @@ function initializeSliders() {
     // Service time slider
     const ti = document.getElementById('time-input');
     if (ti) ti.max = MAX_SERVICE_MINUTES;
+}
+
+/**
+ * Initialize search panel behavior for phone vs desktop
+ * - On phone (≤ 600px): starts minimized
+ * - On desktop: starts expanded
+ * - Allows tapping the search bar to expand/collapse on phone
+ */
+function initializeSearchPanel() {
+    const searchPanel = document.querySelector('.search-panel');
+    if (!searchPanel) return;
+
+    const isPhone = window.innerWidth <= 600;
+
+    if (isPhone) {
+        searchPanel.classList.remove('expanded');   // Start minimized on phone
+    } else {
+        searchPanel.classList.add('expanded');      // Start expanded on desktop
+    }
+
+    // Make search bar clickable to toggle on phone only
+        // On phone: clicking the pill expands the panel
+    if (isPhone) {
+        const pill = searchPanel.querySelector('.search-panel-pill');
+        if (pill) {
+            pill.addEventListener('click', () => {
+                searchPanel.classList.add('expanded');
+                // Focus the input after expand animation
+                setTimeout(() => {
+                    searchPanel.querySelector('#searchInput')?.focus();
+                }, 350);
+            });
+        }
+
+        // Clicking outside the panel collapses it
+        document.addEventListener('click', (e) => {
+            if (searchPanel.classList.contains('expanded') && !searchPanel.contains(e.target)) {
+                searchPanel.classList.remove('expanded');
+            }
+        });
+    }
 }
 
 /**
@@ -1856,6 +1938,17 @@ function onMapMouseUp() {
         mapContainer.classList.remove('map-info', 'map-panning');
     }
 }
+
+/** Helper: ensure a bottom-right control container exists */
+function createBottomLeftContainer() {
+    let bottomLeft = document.querySelector('.maplibregl-ctrl-bottom-left');
+    if (!bottomLeft) {
+        bottomLeft = document.createElement('div');
+        bottomLeft.className = 'maplibregl-ctrl-bottom-left';
+        document.getElementById('map').appendChild(bottomLeft); // or state.map.getContainer()
+    }
+    return bottomLeft;
+}
 // ============================================================================
 // SECTION 14: RESTORE FUNCTIONS (after map style switch)
 // ============================================================================
@@ -1932,7 +2025,6 @@ function restoreServiceArea() {
     if (!state.lastServiceData || !state.markers.service) return;
     drawServiceArea(state.lastServiceData);
 }
-
 
 // ============================================================================
 // SECTION 15: CLEANUP FUNCTIONS
