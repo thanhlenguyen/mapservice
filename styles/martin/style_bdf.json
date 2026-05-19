@@ -55,6 +55,12 @@
       "minzoom": 14,
       "maxzoom": 18
     },
+    "va_samples": {
+      "type": "vector",
+      "tiles": ["http://localhost:3000/va_samples/{z}/{x}/{y}"],
+      "minzoom": 14,
+      "maxzoom": 18
+    },
     "pois": {
       "type": "vector",
       "tiles": ["http://localhost:3000/topology.places/{z}/{x}/{y}"],
@@ -518,7 +524,7 @@
       "source": "building_footprints",
       "source-layer": "Riyadh",
       "minzoom": 14,
-      "layout": {"visibility": "visible"},
+      "layout": {"visibility": "none"},
       "paint": {
           "fill-extrusion-color": "#e8dcc5",
           "fill-extrusion-height": ["get", "Height"]
@@ -570,7 +576,7 @@
             ["get", "HEIGHT"]
         ],
         "fill-extrusion-base": ["get", "Base"],
-        "fill-extrusion-opacity": 0.0,
+        "fill-extrusion-opacity": 0.7,
         "fill-extrusion-color": [
             "match",
             ["get", "LEVEL_ID"],
@@ -594,7 +600,7 @@
     "source": "spl_vertical",
     "source-layer": "Vertical",
     "minzoom": 14,
-    "layout": {"visibility": "visible"},
+    "layout": {"visibility": "none"},
     "paint": {
         "fill-extrusion-height": [
             "*",
@@ -612,7 +618,7 @@
             ],
             ["get", "FloorNumber"]
           ],
-        "fill-extrusion-opacity": 0.7,
+        "fill-extrusion-opacity": 0.8,
         "fill-extrusion-color": [
             "match",
             ["to-number", ["get", "FloorNumber"]],
@@ -622,6 +628,39 @@
               3, "hsl(50, 65%, 83%)",
               4, "hsl(50, 80%, 83%)",
               "hsl(50, 55%, 83%)"
+            ]
+        }
+    },
+    {
+    "id": "VA_Samples",
+    "type": "fill-extrusion",
+    "source": "va_samples",
+    "source-layer": "VerticalAddress",
+    "minzoom": 14,
+    "layout": {"visibility": "visible"},
+    "paint": {
+        "fill-extrusion-height": [
+            "*",
+            ["/",
+              ["get", "BuildingHeight"],
+              ["get", "FloorsAboveGround"]
+            ],
+            ["+", ["get", "FloorID"], 1]
+          ],
+        "fill-extrusion-base": [
+            "*",
+            ["/",
+              ["get", "BuildingHeight"],
+              ["get", "FloorsAboveGround"]
+            ],
+            ["get", "FloorID"]
+          ],
+        "fill-extrusion-opacity": 0.8,
+        "fill-extrusion-color": [
+            "case",
+            ["==", ["%", ["to-number", ["get", "FloorID"]], 2], 0],
+              "hsl(50, 80%, 83%)",  
+              "hsl(50, 45%, 83%)"   
             ]
         }
     },

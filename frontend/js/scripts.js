@@ -142,7 +142,7 @@ const state = {
 
 
 // Module-level vars
-let currentDataset    = 'units';       // Which Elasticsearch index to search: 'units' or 'floors'
+let currentDataset    = 'spl_units';       // Which Elasticsearch index to search: 'SPL Units' or 'Vertical Addresses'
 let currentStyleId    = 'basic-style'; // Which map style is currently active
 let currentHighlightIds = [];          // Layer IDs for 3D search highlights (so we can remove them)
 let currentPopup      = null;          // The currently open map popup (so we can close it later)
@@ -2181,12 +2181,12 @@ async function searchUnits() {
     clearHighlight();
 
     // Choose the right index and fields based on the selected dataset radio button
-    const index = currentDataset === 'units' ? 'building_units' : 'buildings_vertical';
+    const index = currentDataset === 'spl_units' ? 'building_units' : 'buildings_vertical';
     
     // Define which fields to search (with boost values)
-    const fields = currentDataset === 'units'
+    const fields = currentDataset === 'spl_units'
         ? ['properties.UNIT_ID', 'properties.NAME^2', 'properties.NAME_LONG', 'properties.UnitAddres', 'properties.LabelNames']
-        : ['properties.UnitAddress^3', 'properties.ShortAddress^1.8', 'properties.fkFloorID^1.5', 'properties.FloorUsage'];
+        : ['properties.UnitVerticalAddress^3', 'properties.fkShortAddress^1.8'];
 
     // Build Elasticsearch query
     const esQuery = { 
@@ -2230,7 +2230,7 @@ async function searchUnits() {
             item.className = 'result-item';
 
             // Format based on dataset type
-            if (currentDataset === 'units') {
+            if (currentDataset === 'spl_units') {
                 item.innerHTML = `
                     <strong>${props.UNIT_ID || 'N/A'}</strong><br>
                     ${props.LabelNames || 'Unnamed'} (${props.UnitAddres || 'No address'})<br>
@@ -2238,9 +2238,9 @@ async function searchUnits() {
                 `;
             } else {
                 item.innerHTML = `
-                    <strong>${props.UnitAddress || props.fkFloorID || '—'}</strong><br>
-                    Floor ${props.FloorNumber ?? '—'} – ${props.FloorUsage || '—'}<br>
-                    <small>Address: ${props.UnitAddress || props.ShortAddress || 'No address'} | Building: ${props.BuildingHeight ? props.BuildingHeight.toFixed(1) + 'm' : '—'}</small>
+                    <strong>${props.UnitVerticalAddress || props.fkFloorGUID || '—'}</strong><br>
+                    Floor ${props.FloorID ?? '—'} – ${props.UseType || '—'}<br>
+                    <small>Address: ${props.UnitVerticalAddress || props.fkShortAddress || 'No address'} | Building: ${props.BuildingHeight ? props.BuildingHeight.toFixed(1) + 'm' : '—'}</small>
                 `;
             }
 
@@ -2322,20 +2322,21 @@ async function zoomToFeature(feature, clickedElement) {
             </strong><br>
     `;
 
-    if (currentDataset === 'units') {
+    if (currentDataset === 'spl_units') {
         popupHTML += `
             <strong>Unit ID:</strong> ${props.UNIT_ID || '—'}<br>
-            <strong>Address:</strong> ${props.UnitAddres || 'N/A'}<br>
+            <strong>Address:</strong> ${props.UnitVerticalAddress || 'N/A'}<br>
             <strong>Floor:</strong> ${props.Base !== undefined ? props.Base.toFixed(2) + 'm' : 'N/A'}<br>
             <strong>Height:</strong> ${props.HEIGHT !== undefined ? props.HEIGHT.toFixed(2) + 'm' : 'N/A'}<br>
             <strong>Type:</strong> ${props.USE_TYPE || 'N/A'}
         `;
     } else {
         popupHTML += `
-            <strong>ID:</strong> ${props.fkFloorID || props.UnitAddress || '—'}<br>
-            <strong>Address:</strong> ${props.UnitAddress || props.ShortAddress || 'N/A'}<br>
-            <strong>Floor:</strong> ${props.FloorNumber ?? '—'}<br>
-            <strong>Usage:</strong> ${props.FloorUsage || '—'}<br>
+            <strong>ID:</strong> ${props.fkFloorGUID || props.UnitVerticalAddress || '—'}<br>
+            <strong>Address:</strong> ${props.UnitVerticalAddress || props.fkShortAddress || 'N/A'}<br>
+            <strong>Floor:</strong> ${props.FloorID ?? '—'}<br>
+            <strong>Usage:</strong> ${props.UseType || '—'}<br>
+            <strong>Type:</strong> ${props.Occupant || '—'}<br>
             <strong>Total Floors:</strong> ${props.NoofFloors || '—'}<br>
             <strong>Building Height:</strong> ${props.BuildingHeight ? props.BuildingHeight.toFixed(1) + 'm' : '—'}
         `;
@@ -2379,7 +2380,7 @@ function addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML) {
     const props = feature.properties || {};
     
     // Create a safe CSS/MapLibre ID from the feature's identifier
-    const safeId = (props.UNIT_ID || props.fkFloorID || props.UnitAddress || 'feat')
+    const safeId = (props.UNIT_ID || props.fkFloorGUID || props.UnitAddress || 'feat')
         .replace(/[^a-z0-9]/gi, '-');
     const id = `highlight-${safeId}`;
 
@@ -2401,14 +2402,14 @@ function addHighlightAndAnimate(feature, bounds, popupPosition, popupHTML) {
 
     // Calculate extrusion heights based on dataset
     let extrusionBase, extrusionHeight;
-    if (currentDataset === 'units') {
+    if (currentDataset === 'spl_units') {
         // Units: use Base and HEIGHT properties
         extrusionBase = props.Base || 0;
         extrusionHeight = extrusionBase + (props.HEIGHT || 4.25);
     } else {
         // Floors: calculate from building height and floor number
-        const floorH = (props.BuildingHeight || 0) / (props.NoofFloors || 1);
-        extrusionBase = floorH * (props.FloorNumber || 0);
+        const floorH = (props.BuildingHeight || 0) / (props.FloorsAboveGround || 1);
+        extrusionBase = floorH * (props.FloorID || 0);
         extrusionHeight = extrusionBase + floorH;
     }
 

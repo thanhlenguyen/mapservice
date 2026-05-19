@@ -1,5 +1,20 @@
 # =============================================================================
 # app.py — Geo-Routing API (FastAPI + PostGIS + pgRouting)
+#
+# WHY FASTAPI OVER FLASK?
+#   1. Pydantic models replace all the manual _parse_lonlat() / bounds-check
+#      code — invalid inputs are rejected automatically with clear error messages.
+#   2. async def handlers mean the event loop is free while the DB query runs,
+#      so the server can handle many concurrent requests without extra threads.
+#   3. /docs (Swagger UI) and /redoc are generated for free from the type hints.
+#   4. Response models enforce the exact JSON shape the frontend expects.
+#
+# MIGRATION SUMMARY FROM FLASK:
+#   @app.route("/x", methods=["GET"])  →  @app.get("/x")
+#   request.args.get("foo")            →  foo: type = Query(...)  (function param)
+#   jsonify({...})                     →  return {...}  (FastAPI auto-serialises)
+#   abort(400, "msg")                  →  raise HTTPException(400, "msg")
+#   Manual try/except for validation   →  Pydantic does it automatically
 # =============================================================================
 
 from contextlib import asynccontextmanager, contextmanager
@@ -24,7 +39,8 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # DATABASE CONNECTION POOL
-# For a fully async setup you would swap in asyncpg,
+# (Same logic as Flask version — psycopg2 is synchronous, so we keep the
+#  ThreadedConnectionPool.  For a fully async setup you would swap in asyncpg,
 #  but that requires rewriting every query.  This hybrid is the safe migration.)
 # ---------------------------------------------------------------------------
 
@@ -52,6 +68,7 @@ def _init_pool() -> None:
 
 
 # ---------------------------------------------------------------------------
+# FastAPI lifespan — replaces Flask's module-level init_pool() call.
 # The pool is created on startup and cleanly closed on shutdown.
 # ---------------------------------------------------------------------------
 @asynccontextmanager
@@ -156,6 +173,15 @@ def _bbox_buffer(start_lon, start_lat, end_lon, end_lat) -> float:
 
 # ---------------------------------------------------------------------------
 # PYDANTIC REQUEST / RESPONSE MODELS
+#
+# WHY THIS IS BETTER THAN MANUAL VALIDATION:
+#   In Flask we wrote _parse_lonlat() and scattered if/raise blocks.
+#   With Pydantic, we declare the schema once and FastAPI automatically:
+#     - Parses and coerces types (string "1.23" → float 1.23)
+#     - Returns a structured 422 error if any value is invalid
+#     - Documents every field in /docs
+#
+# The @field_validator decorators replace the old bounds-check if-blocks.
 # ---------------------------------------------------------------------------
 
 class LonLat(BaseModel):
@@ -243,6 +269,13 @@ def health():
 
 # ===========================================================================
 # ENDPOINT: GET /route
+#
+# CHANGES FROM FLASK VERSION:
+#   - Query params are now typed function arguments — no request.args.get()
+#   - Pydantic rejects bad types automatically (e.g. start_lon="abc" → 422)
+#   - Bounds checks moved to inline Annotated[float, Query(ge=..., le=...)]
+#   - Response shape is always { routes: [...], count, optimization, requested }
+#     (the Flask version returned a bare FeatureCollection for alternatives=1)
 # ===========================================================================
 
 @app.get("/route", summary="A-to-B routing with alternative paths")
@@ -370,6 +403,11 @@ def get_route(
 
 # ===========================================================================
 # ENDPOINT: POST /route/tsp
+#
+# CHANGES FROM FLASK VERSION:
+#   - request.get_json() replaced by TSPRequest Pydantic model
+#   - All coordinate validation in the model (no manual loop in the handler)
+#   - 400 errors raised with HTTPException, not returned as dicts
 # ===========================================================================
 
 @app.post("/route/tsp", summary="Travelling Salesman Problem routing")
@@ -483,19 +521,19 @@ def get_tsp_route(body: TSPRequest):
         total_cost       = float(tsp_path[-1]["agg_cost"]) if tsp_path else 0.0
 
         node_to_idx    = {vid: i for i, vid in enumerate(vertex_ids)}
-        # waypoint_order is N+1 entries e.g. [2,0,1,2] — last entry closes the loop.
-        # Keep all N+1 so the frontend can color all N legs and show the closing arrow.
         waypoint_order = [node_to_idx[int(r["node"])] for r in tsp_path if int(r["node"]) in node_to_idx]
+        if len(waypoint_order) > len(validated):
+            waypoint_order = waypoint_order[:len(validated)]
 
         return {
             "type":              "FeatureCollection",
-            "segments":          segments,          # N segments, includes the closing leg
+            "segments":          segments,
             "features":          [],
             "total_distance_km": round(total_distance_m / 1000, 2),
             "duration_minutes":  round(total_cost / 60, 1),
             "segment_count":     len(segments),
             "waypoint_count":    len(validated),
-            "waypoint_order":    waypoint_order,    # length N+1, last entry == first
+            "waypoint_order":    waypoint_order,
             "optimization":      "tsp",
         }
 
@@ -508,6 +546,12 @@ def get_tsp_route(body: TSPRequest):
 
 # ===========================================================================
 # ENDPOINT: GET /nearest_facility
+#
+# CHANGES FROM FLASK VERSION:
+#   - Coordinate validation via Query(ge=..., le=...) annotations
+#   - facility_type validated inline with a simple `in` check + HTTPException
+#   - max_distance_km validated with Query(ge=1, le=15)
+#   - No more manual try/except around input parsing
 # ===========================================================================
 
 _ALLOWED_FACILITY_TYPES = frozenset({"hospital", "fire station", "police", "clinic"})
@@ -689,8 +733,12 @@ def service_area(
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Entry point (uvicorn replaces flask dev server)
+#
 # Run with:
+#   uvicorn app:app --host 0.0.0.0 --port 5000 --workers 4
+#
+# Or in development (auto-reload):
 #   uvicorn app:app --host 0.0.0.0 --port 5000 --reload
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
