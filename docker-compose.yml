@@ -2,7 +2,7 @@
 
 services:
   postgis:
-    image: pgrouting/pgrouting:16-3.5-4.0               # PostGIS with pgRouting       
+    image: pgrouting/pgrouting:18-3.6-4.0               # PostGIS with pgRouting       
     container_name: postgis_db
     restart: unless-stopped
     env_file:
@@ -14,7 +14,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - vsol:/var/lib/postgresql/data
+      - vsol:/var/lib/postgresql
       - ./data:/data                     # for CSV import later
     shm_size: 1g  # ← ADD THIS LINE (1GB shared memory)
     healthcheck:
@@ -24,7 +24,7 @@ services:
       retries: 10
       
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.1
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.3
     container_name: elasticsearch
     restart: unless-stopped
     environment:
@@ -52,7 +52,7 @@ services:
       nofile: 65536
 
   kibana:
-    image: docker.elastic.co/kibana/kibana:9.3.1
+    image: docker.elastic.co/kibana/kibana:9.4.3
     container_name: kibana
     restart: unless-stopped
     ports:
@@ -72,7 +72,7 @@ services:
       retries: 5
 
   martin:
-    image: ghcr.io/maplibre/martin:1.5.0   # official image
+    image: ghcr.io/maplibre/martin:1.11.0   # official image
     container_name: martin_server
     restart: unless-stopped
     env_file:
@@ -80,9 +80,11 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./config/martin-config.yml:/config.yml:ro # Martin config file (Martin reads martin-config.yml as config.yml)
+      - ./config/martin-config.yml:/config.yml:ro # Martin config file (Martin reads martin-config.yml as config.yml)     
       - ./data/mbtiles:/mbtiles:ro # MBTiles files (for Martin to serve when we use Martin to render Mbtiles)
       - ./data/pmtiles:/pmtiles:ro # PMTiles files (for Martin to serve when we use Martin to render PMTiles)
+      - ./data/fonts:/fonts:ro           # RAW .ttf / .otf folders
+      - ./data/sprites:/sprites:ro       # RAW .svg icon folders
       - ./styles/martin:/styles:ro  # Mapbox style JSON files (for Martin to serve when we use Martin to render Mbtiles)
     depends_on:
       postgis:
@@ -90,18 +92,20 @@ services:
     command: --config /config.yml
 
   tileserver-gl:
-    image: maptiler/tileserver-gl:latest
+    image: maptiler/tileserver-gl:v5.6.0
     container_name: tileserver_gl
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      - ./config/config.json:/tileserver/config.json:ro       # config.json 
-      - ./styles/tileserver:/tileserver/styles:ro # styles for Tileserver-GL       
-      - ./data/fonts:/tileserver/fonts:ro      # Raw .ttf/.otf files for Martin to generate glyphs
-      - ./data/sprites:/tileserver/sprites:ro  # Individual SVG/PNG files for Martin to generate sprites     
-      - ./data/mbtiles:/data/mbtiles:ro  # mbtiles files 
-    command: --config /tileserver/config.json --verbose
+      - ./config/config.json:/tileserver/config.json:ro       # config.json      
+      - ./data:/data  # main data folder       
+      # - ./data/mbtiles:/tileserver/mbtiles:ro  # mbtiles files  
+      # - ./data/pmtiles:/tileserver/pmtiles:ro  # pmtiles files       
+      # - ./data/fonts:/tileserver/fonts:ro      # Raw .ttf/.otf files for Martin to generate glyphs
+      # - ./data/sprites:/tileserver/sprites:ro  # Individual SVG/PNG files for Martin to generate sprites
+      - ./styles/tileserver:/data/styles:ro # styles for Tileserver-GL 
+    command: --config /tileserver/config.json --verbose 
 
   routing-api:
     image: python:3.12-slim
@@ -121,7 +125,7 @@ services:
         condition: service_healthy
         
   pgadmin:
-    image: dpage/pgadmin4:9.14.0
+    image: dpage/pgadmin4:9.16
     container_name: pgadmin4
     restart: always
     env_file: 
@@ -142,10 +146,10 @@ services:
       - "3001:80"
     volumes:
       - ./frontend:/usr/share/nginx/html
-      - ./data/pmtiles:/usr/share/nginx/html/pmtiles:ro # serve PMTiles files when using PMTiles directly in frontend (serverless method)
-      - ./data/sprites:/usr/share/nginx/html/sprites:ro   # serve sprites
-      - ./data/fonts:/usr/share/nginx/html/fonts:ro       # serve fonts  
-      - ./styles:/usr/share/nginx/html/styles:ro    # serve styles
+      # - ./data/pmtiles:/usr/share/nginx/html/pmtiles:ro # serve PMTiles files when using PMTiles directly in frontend (serverless method)
+      # - ./data/sprites:/usr/share/nginx/html/sprites:ro   # serve sprites
+      # - ./data/fonts:/usr/share/nginx/html/fonts:ro       # serve fonts  
+      # - ./styles:/usr/share/nginx/html/styles:ro    # serve styles
       - ./config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - martin

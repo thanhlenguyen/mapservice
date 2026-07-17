@@ -31,7 +31,7 @@
     }
   },
   "sprite": "sprite",
-  "glyphs": "fonts/{fontstack}/{range}.pbf",
+  "glyphs": "https://map-tiles-frontend.address.gov.sa/fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
       "id": "osm-base",

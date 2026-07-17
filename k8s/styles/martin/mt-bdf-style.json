@@ -14,7 +14,7 @@
     "basemaps": {
       "type": "vector",
       "tiles": ["https://map-tiles-martin.address.gov.sa:443/basemaps/{z}/{x}/{y}"],
-      "minzoom": 1,
+      "minzoom": 0,
       "maxzoom": 12,
       "attribution": "© OvertureMaps"
     }, 
@@ -49,15 +49,15 @@
       "minzoom": 14,
       "maxzoom": 16
     },
+    "building_floors": {
+      "type": "vector",
+      "tiles": ["https://map-tiles-martin.address.gov.sa:443/building_floors/{z}/{x}/{y}"],
+      "minzoom": 14,
+      "maxzoom": 16
+    },
     "spl_vertical": {
       "type": "vector",
       "tiles": ["https://map-tiles-martin.address.gov.sa:443/spl_vertical_address/{z}/{x}/{y}"],
-      "minzoom": 14,
-      "maxzoom": 18
-    },
-    "va_samples": {
-      "type": "vector",
-      "tiles": ["https://map-tiles-martin.address.gov.sa:443/va_samples/{z}/{x}/{y}"],
       "minzoom": 14,
       "maxzoom": 18
     },
@@ -93,7 +93,7 @@
       "paint": {"fill-color": "#78bced"}
     },
     {
-      "id": "country boundaries",
+      "id": "countries boundaries",
       "type": "line",
       "source": "basemaps",
       "source-layer": "country_boundaries",
@@ -176,6 +176,7 @@
       "type": "line",      
       "source": "basemaps",
       "source-layer": "international",
+      "layout": {"visibility": "none"},
       "paint": {"line-width": 3, "line-color": "hsl(0, 3%, 97%)"}
     },
     {
@@ -183,6 +184,41 @@
       "type": "line",
       "source": "basemaps",
       "source-layer": "international",
+      "layout": {"visibility": "none"},
+      "paint": {
+          "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              4,
+              1.5,
+              10,
+              2
+          ],
+          "line-color": "#3c3939",
+          "line-dasharray": [
+              "step",
+              ["zoom"],
+              ["literal", [2, 2]],
+              7,
+              ["literal", [6, 2, 2, 2]]
+          ]
+      }
+    },
+    {
+      "id": "country_background",
+      "type": "line",      
+      "source": "basemaps",
+      "source-layer": "CountryBoundary",
+      "layout": {"visibility": "visible"},
+      "paint": {"line-width": 3, "line-color": "hsl(0, 3%, 97%)"}
+    },
+    {
+      "id": "country-boundary",
+      "type": "line",
+      "source": "basemaps",
+      "source-layer": "CountryBoundary",
+      "layout": {"visibility": "visible"},
       "paint": {
           "line-width": [
               "interpolate",
@@ -526,7 +562,8 @@
       "minzoom": 14,
       "layout": {"visibility": "visible"},
       "paint": {
-          "fill-extrusion-color": "#e8dcc5",
+          "fill-extrusion-color": "#E8DCC8",          
+          "fill-extrusion-opacity": 1,
           "fill-extrusion-height": ["get", "Height"]
       }
     },
@@ -538,9 +575,113 @@
       "minzoom": 14,
       "layout": {"visibility": "visible"},
       "paint": {
-          "fill-extrusion-height": ["get", "rel_height"],
-          "fill-extrusion-color": "#e8dcc5"
+          "fill-extrusion-height": ["get", "rel_height"],         
+          "fill-extrusion-opacity": 1,
+          "fill-extrusion-color": "#E8DCC8"
       }
+    },
+    {
+      "id": "SPL.HQ",
+      "type": "fill-extrusion",
+      "source": "spl_vertical",
+      "source-layer": "Unit",
+      "minzoom": 14,
+      "layout": {"visibility": "visible"},
+      "paint": {
+          "fill-extrusion-height": [
+              "+",
+              ["get", "Base"],
+              ["get", "HEIGHT"]
+          ],
+          "fill-extrusion-base": ["get", "Base"],
+          "fill-extrusion-opacity": 0.80,
+          "fill-extrusion-color": [
+              "match",
+              ["get", "LEVEL_ID"],
+              ["SPL.HQ.L0"],
+              "#fff1a8",
+              ["SPL.HQ.L1"],
+              "hsl(50, 95%, 83%)",
+              ["SPL.HQ.L2"],
+              "hsl(50, 90%, 83%)",
+              ["SPL.HQ.L3"],
+              "hsl(50, 85%, 83%)",
+              ["SPL.HQ.L4"],
+              "hsl(50, 80%, 83%)",
+              "hsl(50, 75%, 83%)"
+              ]
+          }
+    },
+    {
+      "id": "SPL Vertical",
+      "type": "fill-extrusion",
+      "source": "spl_vertical",
+      "source-layer": "Vertical",
+      "minzoom": 14,
+      "layout": {"visibility": "none"},
+      "paint": {
+          "fill-extrusion-height": [
+              "*",
+              ["/",
+                ["get", "BuildingHeight"],
+                ["get", "NoofFloors"]
+              ],
+              ["+", ["get", "FloorNumber"], 1]
+            ],
+          "fill-extrusion-base": [
+              "*",
+              ["/",
+                ["get", "BuildingHeight"],
+                ["get", "NoofFloors"]
+              ],
+              ["get", "FloorNumber"]
+            ],
+          "fill-extrusion-opacity": 0.8,
+          "fill-extrusion-color": [
+              "match",
+              ["to-number", ["get", "FloorNumber"]],
+                0, "#fff1a8",
+                1, "hsl(50, 75%, 83%)",
+                2, "hsl(50, 90%, 83%)",
+                3, "hsl(50, 65%, 83%)",
+                4, "hsl(50, 80%, 83%)",
+                "hsl(50, 55%, 83%)"
+              ]
+          }
+    },
+    {
+      "id": "Floors",
+      "type": "fill-extrusion",
+      "source": "building_floors",
+      "source-layer": "BuildingFloor",
+      "minzoom": 14,
+      "layout": {"visibility": "visible"},      
+      "paint": {
+          "fill-extrusion-height": [
+              "*",
+              ["/",
+                ["get", "BuildingHeight"],
+                ["get", "FloorsAboveGround"]
+              ],
+              ["+", ["get", "FloorNumber"], 1]
+            ],
+          "fill-extrusion-base": [
+              "*",
+              ["/",
+                ["get", "BuildingHeight"],
+                ["get", "FloorsAboveGround"]
+              ],
+              ["get", "FloorNumber"]
+            ],
+          "fill-extrusion-opacity": 1,
+          "fill-extrusion-vertical-gradient": false,
+          "fill-extrusion-color": [
+              "case",
+              ["==", ["%", ["to-number", ["get", "FloorNumber"]], 2], 0],
+              "#E8DCC8",  
+              "#D6C1A4"   
+              ]
+          }
     },
     {
       "id": "address-label",
@@ -561,108 +702,6 @@
         "text-halo-color": "#f3f2f2",
         "text-halo-width": 1.5
       }
-    },
-    {
-    "id": "SPL.HQ",
-    "type": "fill-extrusion",
-    "source": "spl_vertical",
-    "source-layer": "Unit",
-    "minzoom": 14,
-    "layout": {"visibility": "visible"},
-    "paint": {
-        "fill-extrusion-height": [
-            "+",
-            ["get", "Base"],
-            ["get", "HEIGHT"]
-        ],
-        "fill-extrusion-base": ["get", "Base"],
-        "fill-extrusion-opacity": 0.80,
-        "fill-extrusion-color": [
-            "match",
-            ["get", "LEVEL_ID"],
-            ["SPL.HQ.L0"],
-            "#fff1a8",
-            ["SPL.HQ.L1"],
-            "hsl(50, 95%, 83%)",
-            ["SPL.HQ.L2"],
-            "hsl(50, 90%, 83%)",
-            ["SPL.HQ.L3"],
-            "hsl(50, 85%, 83%)",
-            ["SPL.HQ.L4"],
-            "hsl(50, 80%, 83%)",
-            "hsl(50, 75%, 83%)"
-            ]
-        }
-    },
-    {
-    "id": "SPL Vertical",
-    "type": "fill-extrusion",
-    "source": "spl_vertical",
-    "source-layer": "Vertical",
-    "minzoom": 14,
-    "layout": {"visibility": "none"},
-    "paint": {
-        "fill-extrusion-height": [
-            "*",
-            ["/",
-              ["get", "BuildingHeight"],
-              ["get", "NoofFloors"]
-            ],
-            ["+", ["get", "FloorNumber"], 1]
-          ],
-        "fill-extrusion-base": [
-            "*",
-            ["/",
-              ["get", "BuildingHeight"],
-              ["get", "NoofFloors"]
-            ],
-            ["get", "FloorNumber"]
-          ],
-        "fill-extrusion-opacity": 0.8,
-        "fill-extrusion-color": [
-            "match",
-            ["to-number", ["get", "FloorNumber"]],
-              0, "#fff1a8",
-              1, "hsl(50, 75%, 83%)",
-              2, "hsl(50, 90%, 83%)",
-              3, "hsl(50, 65%, 83%)",
-              4, "hsl(50, 80%, 83%)",
-              "hsl(50, 55%, 83%)"
-            ]
-        }
-    },
-    {
-    "id": "VA_Samples",
-    "type": "fill-extrusion",
-    "source": "va_samples",
-    "source-layer": "VerticalAddress",
-    "minzoom": 14,
-    "layout": {"visibility": "visible"},
-    "paint": {
-        "fill-extrusion-height": [
-            "*",
-            ["/",
-              ["get", "BuildingHeight"],
-              ["get", "FloorsAboveGround"]
-            ],
-            ["+", ["get", "FloorID"], 1]
-          ],
-        "fill-extrusion-base": [
-            "*",
-            ["/",
-              ["get", "BuildingHeight"],
-              ["get", "FloorsAboveGround"]
-            ],
-            ["get", "FloorID"]
-          ],
-        "fill-extrusion-opacity": 0.8,
-        "fill-extrusion-color": [
-            "case",
-            ["==", ["%", ["to-number", ["get", "FloorID"]], 2], 0],
-              "hsl(50, 80%, 83%)",  
-              "hsl(50, 45%, 83%)"   
-            ]
-        }
     },
     {
       "id": "poi-label",

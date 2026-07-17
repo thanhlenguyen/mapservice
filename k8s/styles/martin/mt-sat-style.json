@@ -45,13 +45,7 @@
     "basemaps": {
       "type": "vector",
       "tiles": ["https://map-tiles-martin.address.gov.sa:443/basemaps/{z}/{x}/{y}"],
-      "minzoom": 1,
-      "maxzoom": 12
-    },    
-    "international": {
-      "type": "vector",
-      "tiles": ["https://map-tiles-martin.address.gov.sa:443/international/{z}/{x}/{y}"],
-      "minzoom": 1,
+      "minzoom": 0,
       "maxzoom": 12
     },  
     "administrative": {
@@ -103,7 +97,7 @@
       "id": "satellite-9-6",
       "type": "raster",
       "source": "satellite-9-6",
-      "minzoom": 13,
+      "minzoom": 0,
       "paint": {"raster-fade-duration": 0}
     },
     {
@@ -130,17 +124,51 @@
     {
       "id": "international-background",
       "type": "line",
-      "source": "international",
+      "source": "basemaps",
       "source-layer": "international",
-      "layout": {},
+      "layout": {"visibility": "none"},
       "paint": {"line-width": 3, "line-color": "hsl(0, 40%, 65%)"}
     },
     {
       "id": "international-boundary",
       "type": "line",
-      "source": "international",
+      "source": "basemaps",
       "source-layer": "international",
-      "layout": {},
+      "layout": {"visibility": "none"},
+      "paint": {
+          "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              4,
+              1.5,
+              10,
+              2
+          ],
+          "line-dasharray": [
+              "step",
+              ["zoom"],
+              ["literal", [2, 2]],
+              7,
+              ["literal", [6, 6, 2, 2]]
+          ],
+          "line-color": "hsl(0, 16%, 94%)"
+      }
+    },
+    {
+      "id": "country-background",
+      "type": "line",
+      "source": "basemaps",
+      "source-layer": "CountryBoundary",
+      "layout": {"visibility": "visible"},
+      "paint": {"line-width": 3, "line-color": "hsl(0, 40%, 65%)"}
+    },
+    {
+      "id": "country-boundary",
+      "type": "line",
+      "source": "basemaps",
+      "source-layer": "CountryBoundary",
+      "layout": {"visibility": "visible"},
       "paint": {
           "line-width": [
               "interpolate",

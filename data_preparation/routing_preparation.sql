@@ -45,7 +45,7 @@ ALTER TABLE topology.ways ADD PRIMARY KEY (id);
 CREATE INDEX ways_gix_geom ON topology.ways USING GIST (geom);
 
 ```
-
+```sql
 -- Run pgr_extractVertices on the projected geometry (use the projected table and column name)
 DROP TABLE IF EXISTS topology.vertices CASCADE;  
 SELECT * INTO topology.vertices FROM pgr_extractVertices('SELECT id, geom FROM topology.ways');

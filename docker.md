@@ -1,4 +1,4 @@
-, for# Self-Hosted Map System using PostGIS, Martin, and TileServer-GL
+# Self-Hosted Map System using PostGIS, Martin, and TileServer-GL
 
 This guide outlines the steps to replace Mapbox in a localhost environment using a stack of open-source tools for serving static and dynamic vector tiles, and integrating a custom geocoding/POI search and an AI-powered API layer.
 

@@ -1,30 +1,38 @@
 {
   "options": {
     "paths": {
-      "root": "/tileserver",
+      "root": "/data",
       "styles": "styles",
       "fonts": "fonts",
       "sprites": "sprites",
-      "mbtiles": "/data/mbtiles"
+      "mbtiles": "mbtiles",
+      "pmtiles": "pmtiles"
     },
     "domains": [
       "localhost:8080",
       "127.0.0.1:8080"
     ],
-    "formatQuality": {
-      "jpeg": 80,
-      "webp": 90
+    "formatOptions": {
+      "jpeg": {
+        "quality": 80
+      },
+      "webp": {
+        "quality": 90
+      }
     },
     "maxScaleFactor": 3,
     "maxSize": 2048,
     "pbfAlias": "pbf",
-    "serveAllFonts": false,
+    "serveAllFonts": true,
     "serveAllStyles": false,
     "serveStaticMaps": true,
-    "staticAttributionText": "© OpenMapTiles © OpenStreetMap contributors"
+    "allowRemoteMarkerIcons": true,
+    "allowInlineMarkerImages": true,
+    "staticAttributionText": "© OpenMapTiles  © OpenStreetMaps",
+    "tileMargin": 0
   },
   "styles": {
-    "basic-style": {
+    "def-style": {
       "style": "style.json",
       "tilejson": {
             "type": "overlay",
@@ -44,7 +52,14 @@
             "type": "overlay",
             "bounds": [-180, -85.0511, 180, 85.0511]
       }
-    }            
+    },
+    "bdf-style": {
+      "style": "style_bdf.json",
+      "tilejson": {
+            "type": "overlay",
+            "bounds": [-180, -85.0511, 180, 85.0511]
+      }
+    }                     
   },
   "data": {
     "Administrative": {
@@ -58,6 +73,15 @@
     },
     "street_centerline": {
       "mbtiles": "street.mbtiles"
+    },
+    "basemaps": {
+      "pmtiles": "basemaps.pmtiles"
+    },
+    "building_footprint": {
+      "pmtiles": "building_footprint.pmtiles"
+    },
+    "spl_va": {
+      "pmtiles": "spl_vertical_address.pmtiles"
     }
   }
 }

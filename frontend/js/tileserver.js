@@ -1,9 +1,10 @@
 // ---------- 1. Define the three styles ----------
 
 const STYLES = [
-    { id: 'basic', name: 'Default', url: 'http://localhost:8080/styles/basic-style/style.json', pitch: 0, zoom: 12 },
+    { id: 'basic', name: 'Default', url: 'http://localhost:8080/styles/def-style/style.json', pitch: 0, zoom: 12 },
     { id: 'sat', name: 'Satellite', url: 'http://localhost:8080/styles/sat-style/style.json', pitch: 0, zoom: 12 },
-    { id: '3d', name: '3D', url: 'http://localhost:8080/styles/3d-style/style.json', pitch: 45, zoom: 14 }
+    { id: '3d', name: '3D', url: 'http://localhost:8080/styles/3d-style/style.json', pitch: 45, zoom: 14 },
+    { id: 'bdf', name: 'BDF', url: 'http://localhost:8080/styles/bdf-style/style.json', pitch: 45, zoom: 14 }
 ];
 
 // ---------- 2. Track current view to preserve user navigation ----------
@@ -67,7 +68,7 @@ class LayerSwitcherControl {
             btn.type = 'button';
             btn.className = 'maplibregl-ctrl-icon w-10 h-10 flex items-center justify-center text-sm font-medium border-b border-gray-200 hover:bg-gray-100';
             btn.title = s.name;
-            btn.textContent = s.name === '3D' ? '3D' : s.name.charAt(0);
+            btn.textContent = s.name === '3D' ? '3D' : s.name === 'BDF' ? 'BDF' : s.name.charAt(0);
             btn.dataset.styleId = s.id;
 
             if (idx === 0) btn.classList.add('bg-blue-100');

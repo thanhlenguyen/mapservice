@@ -6,8 +6,15 @@
     <title>KSA Route & Service Analysis</title>
 
     <!-- MapLibre -->
-    <script src="https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.js"></script>
-    <link href="https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@^5/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@^5/dist/maplibre-gl.css" rel="stylesheet" />
+
+    <!-- <script src="https://unpkg.com/bkoi-gl@latest/dist/iife/bkoi-gl.js"></script>
+    <link href="https://unpkg.com/bkoi-gl@latest/dist/style/bkoi-gl.css" rel="stylesheet"/> -->
+    
+
+    <!-- <script src="https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@4.3.2/dist/maplibre-gl.css" rel="stylesheet" /> -->
 
     <!-- Fonts (Inter) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -41,6 +48,10 @@
                     <button id="mode-service" class="mode-btn" type="button">
                         🚚 Service Area
                     </button>
+                    <!-- Add new button for Indoor Navigation -->
+                    <button id="mode-indoor" class="mode-btn" type="button">
+                        🏢 Indoor Route
+                    </button>
                 </div>
 
                 <!-- Route optimization selector (shown only in route mode) -->
@@ -58,6 +69,24 @@
                         <input type="checkbox" id="show-alternatives" checked />
                         Show 3 alternative routes
                     </label>
+                </div>
+
+                <!-- New Searching for Indoor Navigation -->
+                <div id="indoor-controls" class="hidden mode-specific-controls">
+                    <label>Start room:
+                        <input type="text" id="indoor-start-search" placeholder="Search room / unit ID..." />
+                    </label>
+                    <div id="indoor-start-results" class="results-list"></div>
+
+                    <label>End room:
+                        <input type="text" id="indoor-end-search" placeholder="Search room / unit ID..." />
+                    </label>
+                    <div id="indoor-end-results" class="results-list"></div>
+
+                    <div id="indoor-floor-switcher" class="hidden">
+                        <label class="slider-label">Viewing floor: <span id="indoor-current-floor"></span></label>
+                        <div id="indoor-floor-buttons"></div>
+                    </div>
                 </div>
                   
                 <!-- Facility type selector (shown only in facility mode) -->

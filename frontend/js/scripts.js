@@ -20,10 +20,10 @@
 // pitch   = how much the camera tilts (0 = flat top-down, 60 = steep 3D angle)
 // bearing = compass rotation in degrees (0 = north up, -20 = slightly rotated)
 const STYLES = [
-    { id: 'basic-style', name: 'Default',   url: 'styles/martin/style.json',     pitch: 0,  bearing: 0   },
-    { id: 'sat-style',   name: 'Satellite', url: 'styles/martin/style_sat.json', pitch: 0,  bearing: 0   },
-    { id: '3d-style',    name: '3D',        url: 'styles/martin/style_3d.json',  pitch: 45, bearing: 0   },
-    { id: 'bdf-style',   name: 'BDF',       url: 'styles/martin/style_bdf.json', pitch: 60, bearing: -20 }
+    { id: 'def-style',   name: 'Default',   url: 'martin/style/style',     pitch: 0,  bearing: 0   },
+    { id: 'sat-style',   name: 'Satellite', url: 'martin/style/style_sat', pitch: 0,  bearing: 0   },
+    { id: '3d-style',    name: '3D',        url: 'martin/style/style_3d',  pitch: 45, bearing: 0   },
+    { id: 'bdf-style',   name: 'BDF',       url: 'martin/style/style_bdf', pitch: 60, bearing: -20 }
 ];
 
 // --- Backend API Endpoints ---
@@ -297,6 +297,11 @@ async function switchMapStyle(style) {
             case 'tsp':      restoreTSPRoute();     break;
             case 'facility': restoreFacilityData(); break;
             case 'service':  restoreServiceArea();  break;
+            case 'indoor':
+                if (state.indoor.lastRouteData) {
+                    renderIndoorFloor(state.indoor.lastRouteData.floors_involved[state.indoor.currentFloorIndex]);
+                }
+                break;
         }
     });
 }
@@ -476,7 +481,7 @@ function setupEventHandlers() {
     });
 
     // Mode switcher buttons (Route / TSP / Facility / Service).
-    ['route', 'tsp', 'facility', 'service'].forEach(mode => {
+    ['route', 'tsp', 'facility', 'service', 'indoor'].forEach(mode => {
         document.getElementById(`mode-${mode}`)?.addEventListener('click', () => switchMode(mode));
     });
 
@@ -540,6 +545,8 @@ function setupEventHandlers() {
             if (state.markers.facility) calculateNearestFacilities(state.markers.facility.getLngLat());
         });
     }
+    // Call indoor function
+    setupIndoorMode();
 
     // Building search — press Enter to run.
     document.getElementById('searchInput')?.addEventListener('keypress', (e) => {
@@ -626,6 +633,7 @@ function updateModeInstructions(mode) {
     document.getElementById('facility-selector')?.classList.toggle('hidden', mode !== 'facility');
     document.getElementById('facility-sliders-container')?.classList.toggle('hidden', mode !== 'facility');
     document.getElementById('time-slider')?.classList.toggle('hidden', mode !== 'service');
+    document.getElementById('indoor-controls')?.classList.toggle('hidden', mode !== 'indoor');
 
     // Each mode has its own instructional HTML and status message.
     const instructions = {
@@ -636,8 +644,11 @@ function updateModeInstructions(mode) {
         facility: { html: 'Click a <span style="color:#ef4444;font-weight:bold">location</span> to find nearest facilities',
                     info: '🏥 Nearest Facility mode active' },
         service:  { html: 'Click <span style="color:#ef4444;font-weight:bold">service location</span> + adjust time',
-                    info: '🚚 Service Area mode active' }
-    };
+                    info: '🚚 Service Area mode active' },
+        indoor: { html: 'Search a <span style="color:#059669;font-weight:bold">start</span> and '
+                        + '<span style="color:#059669;font-weight:bold">end</span> room',
+                    info: '🏢 Indoor Route mode active' },            
+        };
 
     const cfg = instructions[mode];
     if (cfg) {
@@ -1221,6 +1232,145 @@ function drawServiceArea(data) {
     }
 }
 
+// ============================================================================
+// SECTION 10b: INDOOR ROUTE MODE
+// ============================================================================
+
+const INDOOR_API = `${BACKEND_URL}/indoor`;
+
+state.indoor = {
+    startId: null, endId: null,   // surrogate ids (indoor.units.id), NOT unit_id
+    lastRouteData: null,
+    currentFloorIndex: 0,
+};
+
+function initIndoorSearch(inputId, resultsId, onPick) {
+    const input = document.getElementById(inputId);
+    const results = document.getElementById(resultsId);
+    let debounceTimer;
+    input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+            const q = input.value.trim();
+            if (!q) { results.innerHTML = ''; return; }
+            try {
+                const data = await fetchWithTimeout(
+                    `${INDOOR_API}/search?q=${encodeURIComponent(q)}&limit=8`
+                );
+                results.innerHTML = '';
+                data.results.forEach(r => {
+                    const item = document.createElement('div');
+                    item.className = 'result-item';
+                    item.innerHTML = `<strong>${r.name || r.unit_id}</strong><br>
+                        <small>${r.level_id.replace('SPL.HQ.', '')} · ${r.use_type || ''}</small>`;
+                    item.onclick = () => {
+                        onPick(r.id, r.level_id, r.name || r.unit_id);
+                        input.value = `${r.name || r.unit_id} (${r.level_id.replace('SPL.HQ.', '')})`;
+                        results.innerHTML = '';
+                    };
+                    results.appendChild(item);
+                });
+            } catch (err) {
+                console.error('Indoor search error:', err);
+            }
+        }, 300);
+    });
+}
+
+function setupIndoorMode() {
+    initIndoorSearch('indoor-start-search', 'indoor-start-results', (id) => {
+        state.indoor.startId = id;
+        maybeCalculateIndoorRoute();
+    });
+    initIndoorSearch('indoor-end-search', 'indoor-end-results', (id) => {
+        state.indoor.endId = id;
+        maybeCalculateIndoorRoute();
+    });
+}
+
+function maybeCalculateIndoorRoute() {
+    if (state.indoor.startId && state.indoor.endId) calculateIndoorRoute();
+}
+
+async function calculateIndoorRoute() {
+    showInfo('⏳ Calculating indoor route...');
+    try {
+        const url = `${INDOOR_API}/route?start_id=${state.indoor.startId}&end_id=${state.indoor.endId}`;
+        const data = await fetchWithTimeout(url);
+        if (data.error) throw new Error(data.error);
+
+        state.indoor.lastRouteData = data;
+        state.indoor.currentFloorIndex = 0;
+        renderIndoorFloorSwitcher(data.floors_involved);
+        renderIndoorFloor(data.floors_involved[0]);
+
+        let summary = `✅ <strong>Indoor route:</strong> ${data.total_time_min} min • ${data.total_distance_m} m`;
+        if (data.transitions.length > 0) {
+            summary += '<br>' + data.transitions.map(t =>
+                `🔀 ${t.via_use_type || 'transition'} ${t.via_name || ''}: ${t.from_level} → ${t.to_level}`
+            ).join('<br>');
+        }
+        showInfo(summary);
+    } catch (error) {
+        handleError('Indoor route', error);
+    }
+}
+
+/** Show a small floor tab bar so the user can step through multi-floor routes. */
+function renderIndoorFloorSwitcher(floors) {
+    const container = document.getElementById('indoor-floor-switcher');
+    const buttons = document.getElementById('indoor-floor-buttons');
+    if (floors.length <= 1) { container.classList.add('hidden'); return; }
+
+    container.classList.remove('hidden');
+    buttons.innerHTML = '';
+    floors.forEach((level, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = level.replace('SPL.HQ.', '');
+        btn.className = i === 0 ? 'route-opt-btn active' : 'route-opt-btn';
+        btn.onclick = () => {
+            state.indoor.currentFloorIndex = i;
+            document.querySelectorAll('#indoor-floor-buttons button')
+                .forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderIndoorFloor(level);
+        };
+        buttons.appendChild(btn);
+    });
+}
+
+/** Draw one floor's route segment. Call this again whenever the map style switches. */
+function renderIndoorFloor(levelId) {
+    clearIndoorLayers();
+    const data = state.indoor.lastRouteData;
+    if (!data) return;
+
+    const segment = data.segments.find(s => s.level_id === levelId);
+    document.getElementById('indoor-current-floor').textContent = levelId.replace('SPL.HQ.', '');
+    if (!segment || segment.features.length === 0) return;
+
+    addRouteLayer({ type: 'FeatureCollection', features: segment.features },
+                   '#059669', 0.9, 5, 'indoor-route');
+    fitToFeatures({ type: 'FeatureCollection', features: segment.features });
+}
+
+function clearIndoorLayers() {
+    ['indoor-route'].forEach(id => {
+        if (state.map.getLayer(id))  state.map.removeLayer(id);
+        if (state.map.getSource(id)) state.map.removeSource(id);
+    });
+}
+
+function clearIndoorMode() {
+    clearIndoorLayers();
+    state.indoor.startId = null;
+    state.indoor.endId = null;
+    state.indoor.lastRouteData = null;
+    document.getElementById('indoor-start-search').value = '';
+    document.getElementById('indoor-end-search').value = '';
+    document.getElementById('indoor-floor-switcher').classList.add('hidden');
+}
 
 // ============================================================================
 // SECTION 11: INFO POINTER FEATURE
@@ -1973,6 +2123,7 @@ function clearAll() {
     clearTSPLayers();
     clearFacilityData();
     clearServiceArea();
+    clearIndoorMode();
     clearHighlight();
     clearFeatureHighlight();
 
