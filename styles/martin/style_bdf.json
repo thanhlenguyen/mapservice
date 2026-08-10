@@ -24,7 +24,7 @@
     ]
   },
   "sprite": "http://localhost:3001/martin/sdf_sprite/sprites",
-  "glyphs": "http://localhost:3001/martin/font/{fontstack}/{range}.pbf",
+  "glyphs": "http://localhost:3001/martin/font/{fontstack}/{range}",
   "sources": {
     "osm": {
       "type": "raster",
@@ -67,6 +67,12 @@
     "building_footprints": {
       "type": "vector",
       "tiles": ["http://localhost:3000/building_footprint/{z}/{x}/{y}"],
+      "minzoom": 14,
+      "maxzoom": 16
+    },
+    "building_floors": {
+      "type": "vector",
+      "tiles": ["http://localhost:3000/building_floors/{z}/{x}/{y}"],
       "minzoom": 14,
       "maxzoom": 16
     },
@@ -543,7 +549,7 @@
       "source": "building_footprints",
       "source-layer": "Riyadh",
       "minzoom": 14,
-      "layout": {"visibility": "visible"},
+      "layout": {"visibility": "none"},
       "paint": {
           "fill-extrusion-color": "#e8dcc5",
           "fill-extrusion-height": ["get", "Height"]
@@ -684,6 +690,40 @@
         }
     },
     {
+      "id": "BuildingFloor",
+      "type": "fill-extrusion",
+      "source": "building_floors",
+      "source-layer": "BuildingFloor",
+      "minzoom": 14,
+      "layout": {},
+      "paint": {
+          "fill-extrusion-height": [
+              "*",
+              [
+                  "/",
+                  ["get", "BuildingHeight"],
+                  ["get", "FloorsAboveGround"]
+              ],
+              ["+", ["get", "FloorNumber"], 1]
+          ],
+          "fill-extrusion-base": [
+              "*",
+              [
+                  "/",
+                  ["get", "BuildingHeight"],
+                  ["get", "FloorsAboveGround"]
+              ],
+              ["get", "FloorNumber"]
+          ],
+          "fill-extrusion-color": [
+              "case",
+              ["==", ["%", ["to-number", ["get", "FloorNumber"]], 2], 0],
+              "#E8DCC8",
+              "#D6C1A4"
+          ]
+      }
+    },
+    {
       "id": "poi-label",
       "type": "symbol",
       "source": "pois",
@@ -714,7 +754,17 @@
         ],
         "text-halo-color": "#ffffff",
         "text-halo-width": 0.5,
-        "icon-color": "rgba(112, 53, 53, 1)"
+        "icon-color": [
+          "match",
+          ["get", "class"],
+          ["food_and_drink_stores", "food_and_drink"],
+          "#b64f1b",
+          ["education"],
+          "#5c4923",
+          ["store_like"],
+          "#8e5a57",
+          "#78553a"
+        ]
       }
     }
   ],

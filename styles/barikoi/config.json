@@ -1,0 +1,190 @@
+{
+  "options": {
+    "paths": {
+      "root": "/data",
+      "fonts": "fonts",
+      "sprites": "sprites",
+      "styles": "styles",
+      "mbtiles": "data",
+      "pmtiles": "data/pmtiles"
+    },
+    "serveAllFonts": true
+  },
+  "styles": {
+
+    "basic-style": {
+        "style": "na/style.json",
+        "tilejson": {
+        "type": "overlay",
+        "bounds": [-180, -85.0511, 180, 85.0511]
+        }
+    },
+
+    "sat-style": {
+        "style": "na/style_sat.json",
+        "tilejson": {
+        "type": "overlay",
+        "bounds": [-180, -85.0511, 180, 85.0511]
+        }
+    },
+
+    "3d-style": {
+        "style": "na/style_3d.json",
+        "tilejson": {
+        "type": "overlay",
+        "bounds": [-180, -85.0511, 180, 85.0511]
+        }
+    },
+
+    "bdf-style": {
+        "style": "na/style_bdf.json",
+        "tilejson": {
+        "type": "overlay",
+        "bounds": [-180, -85.0511, 180, 85.0511]
+        }
+    },
+
+    "dm-style": {
+        "style": "na/style_dm.json",
+        "tilejson": {
+        "type": "overlay",
+        "bounds": [-180, -85.0511, 180, 85.0511]
+        }
+    },
+
+    "dm-3d-style": {
+        "style": "na/style_3d_dm.json",
+        "tilejson": {
+        "type": "overlay",
+        "bounds": [-180, -85.0511, 180, 85.0511]
+        }
+    },
+
+    "dm-bdf-style": {
+        "style": "na/style_bdf_dm.json",
+        "tilejson": {
+        "type": "overlay",
+        "bounds": [-180, -85.0511, 180, 85.0511]
+        }
+    },
+
+    "spl_bgmaps": {
+      "style": "barikoi/spl_bgmaps.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    },
+    "spl_bgmaps_ar": {
+      "style": "barikoi/spl_bgmaps_ar.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    },
+    "spl_bgmaps_en": {
+      "style": "barikoi/spl_bgmaps_en.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    },
+    "spl_dark": {
+      "style": "barikoi/spl_dark.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    },
+    "spl_dark_ar": {
+      "style": "barikoi/spl_dark_ar.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    },
+    "spl_dark_en": {
+      "style": "barikoi/spl_dark_en.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    },
+    "spl_desert_v2": {
+      "style": "barikoi/spl_desert_v2.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    },
+    "spl_prime": {
+      "style": "barikoi/spl_prime.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    },
+    "spl_satellite": {
+      "style": "barikoi/spl_satellite.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    },
+    "spl_satellite_ar": {
+      "style": "barikoi/spl_satellite_ar.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    },
+    "spl_satellite_en": {
+      "style": "barikoi/spl_satellite_en.json",
+      "tilejson": {
+        "bounds": [34.43489, 15.24752, 60.94748, 32.19653]
+      }
+    }
+  },
+  "data": {
+    "basemaps": {
+      "pmtiles": "basemaps.pmtiles"
+    },
+    "administrative": {
+      "pmtiles": "administrative.pmtiles"
+    },
+      "city_district_zone": {
+      "pmtiles": "city_district_zone.pmtiles"
+    },
+    "address_layer": {
+      "pmtiles": "address_layer.pmtiles"
+    },
+    "street_centerline": {
+      "pmtiles": "street_centerline.pmtiles"
+    },
+    "building_floors": {
+      "pmtiles": "building_floors.pmtiles"
+    },
+    "building_footprint": {
+      "pmtiles": "building_footprint.pmtiles"
+    },
+    "spl_va": {
+      "pmtiles": "spl_vertical_address.pmtiles"
+    },
+    "pois": {
+      "pmtiles": "pois_spl.pmtiles"
+    },
+
+
+    "gcc_final": {
+      "pmtiles": "gcc_final.pmtiles"
+    },
+    "saudi": {
+      "mbtiles": "saudi.mbtiles"
+    },
+    "ecopia_jeddah": {
+      "mbtiles": "ecopia_jeddah.mbtiles"
+    },
+    "vertical_address": {
+      "mbtiles": "vertical_address.mbtiles"
+    },
+    "vertical_address_kacst": {
+      "mbtiles": "vertical_address_kacst.mbtiles"
+    },
+    "vertical_address_kacst_demo2": {
+      "mbtiles": "vertical_address_kacst_demo2.mbtiles"
+    },
+    "evig": {
+      "mbtiles": "evig.mbtiles"
+    }
+  }
+}

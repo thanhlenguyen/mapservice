@@ -23,8 +23,8 @@
         0
     ]
   },
-  "sprite": "http://localhost:3001/martin/sdf_sprite/sprites",
-  "glyphs": "http://localhost:3001/martin/font/{fontstack}/{range}.pbf",
+  "sprite": "http://localhost:3000/sdf_sprite/sprites",
+  "glyphs": "http://localhost:3000/font/{fontstack}/{range}",
   "sources": {
     "osm": {
       "type": "raster",
@@ -177,6 +177,7 @@
       "type": "line",      
       "source": "basemaps",
       "source-layer": "international",
+      "layout": {"visibility": "none"},
       "paint": {"line-width": 3, "line-color": "hsl(0, 3%, 97%)"}
   },
     {
@@ -204,6 +205,56 @@
           ]
       }
     },
+
+    {
+      "id": "Country",
+      "type": "fill",
+      "source": "basemaps",
+      "source-layer": "CountryBoundary",
+      "minzoom": 8,
+      "paint": {"fill-opacity": 0}
+    },
+    {
+      "id": "Emirate",
+      "type": "fill",
+      "source": "administrative",
+      "source-layer": "Emirate",
+      "minzoom": 8,
+      "paint": {"fill-opacity": 0}
+    },
+    {
+      "id": "Governorate",
+      "type": "fill",
+      "source": "administrative",
+      "source-layer": "Governorate",
+      "minzoom": 8,
+      "paint": {"fill-opacity": 0}
+    },
+    {
+      "id": "City",
+      "type": "fill",
+      "source": "city_district_zone",
+      "source-layer": "CityBoundary",
+      "minzoom": 8,
+      "paint": {"fill-opacity": 0}
+    },
+    {
+      "id": "District",
+      "type": "fill",
+      "source": "city_district_zone",
+      "source-layer": "District",
+      "minzoom": 8,
+      "paint": {"fill-opacity": 0}
+    },
+    {
+      "id": "Zone",
+      "type": "fill",
+      "source": "city_district_zone",
+      "source-layer": "ZipCode",
+      "minzoom": 8,
+      "paint": {"fill-opacity": 0}
+    },
+
     {
       "id": "emirate_bg",
       "type": "line",
@@ -533,7 +584,7 @@
       "source-layer": "topology.places",
       "minzoom": 14,
       "layout": {
-        "icon-image":  ["get", "maki"],
+        "icon-image": ["get", "maki"],
         "icon-size": 1,
         "icon-allow-overlap": true,
         "text-field": ["get", "name"],
@@ -557,7 +608,17 @@
         ],
         "text-halo-color": "#ffffff",
         "text-halo-width": 0.5,
-        "icon-color": "rgba(112, 53, 53, 1)"
+        "icon-color": [
+          "match",
+          ["get", "class"],
+          ["food_and_drink_stores", "food_and_drink"],
+          "#b64f1b",
+          ["education"],
+          "#5c4923",
+          ["store_like"],
+          "#8e5a57",
+          "#78553a"
+        ]
       }
     }
   ],

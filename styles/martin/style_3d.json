@@ -5,7 +5,7 @@
   "center": [46.6753, 24.7136],
   "zoom": 10,
   "sprite": "http://localhost:3001/martin/sdf_sprite/sprites",
-  "glyphs": "http://localhost:3001/martin/font/{fontstack}/{range}.pbf",
+  "glyphs": "http://localhost:3001/martin/font/{fontstack}/{range}",
   "sky": {
     "sky-color": "#199EF3",
     "sky-horizon-blend": 0.5,
@@ -571,7 +571,17 @@
         ],
         "text-halo-color": "#ffffff",
         "text-halo-width": 0.5,
-        "icon-color": "rgba(112, 53, 53, 1)"
+        "icon-color": [
+          "match",
+          ["get", "class"],
+          ["food_and_drink_stores", "food_and_drink"],
+          "#b64f1b",
+          ["education"],
+          "#5c4923",
+          ["store_like"],
+          "#8e5a57",
+          "#78553a"
+        ]
       }
     }
   ],

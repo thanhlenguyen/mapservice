@@ -3,7 +3,28 @@
   "name": "Satellite Imagery Style",
   "metadata": {"maputnik:renderer": "mlgljs"},
   "center": [46.6753, 24.7136],
-  "zoom": 6,
+  "zoom": 6,  
+  "sprite": "/sprite",
+  "glyphs": "https://map-tiles-tileserver.address.gov.sa/fonts/{fontstack}/{range}.pbf",
+  "sky": {
+    "sky-color": "#199EF3",
+    "sky-horizon-blend": 0.5,
+    "horizon-color": "#ffffff",
+    "horizon-fog-blend": 0.5,
+    "fog-color": "#0000ff",
+    "fog-ground-blend": 0.5,
+    "atmosphere-blend": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        0,
+        1,
+        10,
+        1,
+        12,
+        0
+    ]
+  },
   "sources": {
     "esri-satellite": {
       "type": "raster",
@@ -36,20 +57,20 @@
     }, 
     "administrative": {
       "type": "vector", 
-      "url": "mbtiles://Administrative"
+      "url": "pmtiles://administrative"
     },
 
     "city_district_zone": {
       "type": "vector",
-      "url": "mbtiles://City_District_Zone"
+      "url": "pmtiles://city_district_zone"
     },
     "address_layer": {
       "type": "vector", 
-      "url": "mbtiles://address_layer"
+      "url": "pmtiles://address_layer"
     },
     "street_centerline": {
       "type": "vector",
-      "url": "mbtiles://street_centerline"
+      "url": "pmtiles://street_centerline"
     },
     "pois": {
       "type": "vector",
@@ -58,8 +79,6 @@
       "maxzoom": 22
     }
   },
-  "sprite": "sprite",
-  "glyphs": "fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
       "id": "background",
@@ -435,7 +454,7 @@
       "source-layer": "topology.places",
       "minzoom": 14,
       "layout": {
-        "icon-image": ["concat", ["get", "osm_icon"], "_11"],
+        "icon-image": ["get", "maki"],
         "icon-size": 1,
         "icon-allow-overlap": true,
         "text-field": ["get", "name"],
@@ -455,7 +474,13 @@
         ],
         "text-halo-color": "#0a0a0a",
         "text-halo-width": 1,
-        "icon-color": "#E1ED08",
+        "icon-color": [
+          "match",
+          ["get", "class"],
+          ["park_like"],
+          "#b1ff75",
+          "#ffffff"
+        ],
         "icon-halo-color": "#B92C2C"
       }
     }

@@ -72,7 +72,7 @@ services:
       retries: 5
 
   martin:
-    image: ghcr.io/maplibre/martin:1.11.0   # official image
+    image: ghcr.io/maplibre/martin:1.13.0   # official image
     container_name: martin_server
     restart: unless-stopped
     env_file:
