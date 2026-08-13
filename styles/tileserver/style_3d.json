@@ -3,7 +3,7 @@
   "name": "3D Map Light Style",
   "metadata": {"maputnik:renderer": "mlgljs"},
   "center": [46.6753, 24.7136],
-  "zoom": 10,
+  "zoom": 6,
   "sprite": "/sprite",
   "glyphs": "{fontstack}/{range}.pbf",
   "sky": {
@@ -48,14 +48,6 @@
       "attribution": "© National Address"
     },
 
-    "address_layer": {
-      "type": "vector", 
-      "url": "pmtiles://{address_layer}",
-      "minzoom": 14,
-      "maxzoom": 15,
-      "attribution": "© National Address"
-    },
-
     "street_centerline": {
       "type": "vector",
       "url": "pmtiles://{street_centerline}",
@@ -64,11 +56,19 @@
       "attribution": "© National Address"
     },
 
-    "main_street": {
-      "type": "vector",
-      "url": "pmtiles://{main_street}",
-      "minzoom": 5,
-      "maxzoom": 15,
+    "address_layer": {
+      "type": "vector", 
+      "url": "pmtiles://{address_layer}",
+      "minzoom": 14,
+      "maxzoom": 16,
+      "attribution": "© National Address"
+    },
+
+    "personal_address": {
+      "type": "vector", 
+      "url": "pmtiles://{personal_address}",
+      "minzoom": 14,
+      "maxzoom": 16,
       "attribution": "© National Address"
     },
 
@@ -173,7 +173,7 @@
               ["entertainment"], "#f5e6d3",
               "#f1eee8"
             ],
-          "fill-opacity": 0.5
+          "fill-opacity": 0.1
         }
     },
     
@@ -361,11 +361,10 @@
     {
       "id": "street_Region",
       "type": "line",
-      "source": "main_street",
-      "source-layer": "Street",
+      "source": "street_centerline",
+      "source-layer": "RegionStreet",
       "minzoom": 5,
-      "filter": ["any", ["==", "Subtype", 1], ["==", "Subtype", 2]],
-      "layout": {
+      "layout": {"visibility": "visible",
         "line-cap": {"stops": [[0, "butt"], [16, "round"]]},
         "line-join": {"stops": [[0, "miter"], [14, "round"]]}
       },
@@ -387,10 +386,9 @@
       "id": "street_Major",
       "type": "line",
       "source": "street_centerline",
-      "source-layer": "Street",
+      "source-layer": "MainStreet",
       "minzoom": 8,
-      "filter": ["any", ["==", "Subtype", 3], ["==", "Subtype", 4]],
-      "layout": {
+      "layout": {"visibility": "visible",
         "line-cap": {"stops": [[0, "butt"], [16, "round"]]},
         "line-join": {"stops": [[0, "miter"], [14, "round"]]}
       },
@@ -411,15 +409,9 @@
       "id": "street_Other",
       "type": "line",
       "source": "street_centerline",
-      "source-layer": "Street",
+      "source-layer": "OtherStreet",
       "minzoom": 12.5,
-      "filter": [
-        "none",
-        ["==", "Subtype", 1],
-        ["==", "Subtype", 2],
-        ["==", "Subtype", 3],
-        ["==", "Subtype", 4]
-      ],
+      "layout": {"visibility": "visible"},
       "paint": {
         "line-opacity": 1,
         "line-color": "#aab9c9",
@@ -433,6 +425,7 @@
           ]
       }
     },
+
     {
       "id": "address-3d",
       "type": "fill-extrusion",
@@ -458,7 +451,7 @@
         "fill-extrusion-opacity": 0.85
       }
     },
-    
+
     {
       "id": "country-label",
       "type": "symbol",
@@ -637,13 +630,13 @@
         "text-halo-blur": 0
       }
     },
+
     {
-      "id": "street_Major-label",
+      "id": "street_Region-label",
       "type": "symbol",
       "source": "street_centerline",
-      "source-layer": "Street",
+      "source-layer": "RegionStreet",
       "minzoom": 7,
-      "filter": ["any", ["==", "Subtype", 1], ["==", "Subtype", 2]],
       "layout": {
         "text-field": ["get", "EnglishName"],
         "text-font": ["Roboto Regular"],
@@ -677,12 +670,50 @@
       }
     },
     {
-      "id": "street-label",
+      "id": "street_Main-label",
       "type": "symbol",
       "source": "street_centerline",
-      "source-layer": "Street",
+      "source-layer": "MainStreet",
+      "minzoom": 10,
+      "layout": {
+        "text-field": ["get", "EnglishName"],
+        "text-font": ["Roboto Regular"],
+        "text-size": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              10, 9,
+              18, 12
+          ],
+        "symbol-placement": "line",
+        "text-anchor": "center",
+        "visibility": "visible",
+        "text-max-angle": 30,
+        "text-rotation-alignment": "map",
+        "text-padding": 1,
+        "text-letter-spacing": 0.01,
+        "symbol-spacing": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          0, 1,
+          18, 250,
+          22, 1627
+        ]
+      },
+      "paint": {
+        "text-color": "#202325",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1,
+        "text-translate-anchor": "viewport"
+      }
+    },
+    {
+      "id": "street_Other-label",
+      "type": "symbol",
+      "source": "street_centerline",
+      "source-layer": "OtherStreet",
       "minzoom": 12.5,
-      "filter": ["none", ["==", "Subtype", 1], ["==", "Subtype", 2]],
       "layout": {
         "text-field": ["get", "EnglishName"],
         "text-font": ["Roboto Regular"],
@@ -716,6 +747,7 @@
         "text-translate-anchor": "viewport"
       }
     },
+
     {
       "id": "address-label",
       "type": "symbol",
@@ -739,6 +771,54 @@
       "paint": {
         "text-color": "#383839",
         "text-halo-color": "#ffffff",
+        "text-halo-width": 1
+      }
+    },
+
+    {
+      "id": "3D Personalize Address",
+      "type": "fill-extrusion",
+      "source": "personal_address",
+      "source-layer": "Personalize_Address",
+      "minzoom": 14,
+      "layout": {"visibility": "visible"},
+      "paint": {
+          "fill-extrusion-height": [
+              "case",
+              [
+                  "any",
+                  ["==", ["get", "LandTypeID"], 5001],
+                  ["==", ["get", "LandTypeID"], 7002],
+                  ["==", ["get", "LandTypeID"], 8001]
+              ],
+              0,
+              ["==", ["get", "NoOfFloor"], null],
+              4,
+              ["*", ["get", "NoOfFloor"], 3]
+          ],
+          "fill-extrusion-color": "#e0e49b"
+      }
+    },
+    {
+      "id": "3D Personalize Address Label",
+      "type": "symbol",
+      "source": "personal_address",
+      "source-layer": "Personalize_Address",
+      "minzoom": 14.5,
+      "layout": {"visibility": "visible",
+          "text-field": ["to-string", ["get", "ShortAddress"]],
+          "text-font": ["Roboto Bold"],
+          "text-size": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              15, 6,
+              20, 11
+          ]
+      },
+      "paint": {
+        "text-color": "#383839",
+        "text-halo-color": "#f3f2f2",
         "text-halo-width": 1
       }
     },

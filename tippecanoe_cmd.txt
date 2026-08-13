@@ -1,27 +1,23 @@
-tippecanoe --force --drop-rate g  -z12 -Z0 --base-zoom 4 --drop-rate 2 --no-line-simplification --simplification 5 --output administrative.pmtiles --name "Administrative Layers" --description "Country, Emirate, Governorate with boundaries and labels" Country.geojson Emirate.geojson Governorate.geojson Country_Label.geojson Emirate_Label.geojson Governorate_Label.geojson
+tippecanoe --force --drop-rate g  -z12 -Z0 --base-zoom 4 --drop-rate 2 --no-line-simplification --simplification 5 --output administrative.pmtiles --name "Administrative Layers" --description "Country, Emirate, Governorate with boundaries and labels" \
+ Country.geojson Emirate.geojson Governorate.geojson Country_Label.geojson Emirate_Label.geojson Governorate_Label.geojson
 
-tippecanoe --force --no-clipping  -z13 -Z9 --base-zoom 10 --drop-rate 2 --output city_district_zone.pmtiles --name "City, District and Zone Layers" --description "City Center point and City, District, Zone boundaries layers" CityBoundary.geojson CityCenter.geojson District.geojson ZipCode.geojson
+tippecanoe --force --no-clipping  -z13 -Z9 --base-zoom 9 --drop-rate 2 --read-parallel --output city_district_zone.pmtiles --name "City, District and Zone Layers" --description "City Center point and City, District, Zone boundaries layers" \
+CityBoundary.geojson CityCenter.geojson District.geojson ZipCode.geojson
 
-tippecanoe --force --drop-densest-as-needed --layer Street -z15 -Z5 --no-simplification-of-shared-nodes --no-line-simplification --simplification 4 --output street_centerline.pmtiles --name "Street Layer" --description "Street Centerline layer" Street.geojson
+tippecanoe --force --drop-densest-as-needed -z15 -Z5 --layer RegionStreet --output region_street.pmtiles RegionStreet.geojson
+tippecanoe --force --drop-densest-as-needed --read-parallel -z15 -Z8 --layer MainStreet --output main_street.pmtiles MainStreet.geojson
+tippecanoe --force --drop-densest-as-needed --read-parallel -z15 -Z12 --layer OtherStreet --output other_street.pmtiles OtherStreet.geojson
+tile-join --force --no-tile-size-limit -o street_centerline.pmtiles --name "Street Layer" \
+--description "Street Centerline layer" region_street.pmtiles main_street.pmtiles other_street.pmtiles
 
-tippecanoe --force --no-clipping --layer Short_Address -z16 -Z14 --output address_layer.pmtiles --name "Short Address Layer" --description "Short Address layer" Riyadh.geojson Makkah.geojson Group1ENN.geojson Group2ABJJ.geojson Group3HMQT.geojson
+tippecanoe --force --no-clipping --layer Short_Address -z16 -Z14 --read-parallel --output address_layer.pmtiles --name "Short Address Layer" --description "Short Address layer" Riyadh.geojson Makkah.geojson Group1ENN.geojson Group2ABJJ.geojson Group3HMQT.geojson
 
-tippecanoe --force --no-clipping --layer Personalize_Address -z16 -Z12 --output personal_address.pmtiles --name "Personalized Address Layer" --description "Short Address Personalized layer" 'PersonalizeAddress.geojson'
+tippecanoe --force --no-clipping --layer Personalize_Address -z16 -Z12 --read-parallel --output personal_address.pmtiles --name "Personalized Address Layer" --description "Short Address Personalized layer" 'PersonalizedAddress.geojson'
 
 tippecanoe -f -z15 -Z10 -rg --drop-densest-as-needed --drop-rate g --no-feature-limit --no-tile-size-limit -l pois_spl -o pois_spl.pmtiles --name "Point of Interest Layer" --description "Points of Interest SPL provided" pois.geojson
 
 # tippecanoe -f -z15 -Z10 -rg --drop-densest-as-needed --drop-rate g --no-feature-limit --no-tile-size-limit -l poi -o pois.mbtiles pois.geojson
 
-tippecanoe --force --drop-rate g  -z12 -Z1 --output  basemaps1.pmtiles country-boundaries.geojson international.geojson landwater.geojson land_use.geojson
-
-
-tippecanoe --force --drop-rate g -z12 -Z0 --output land_use.pmtiles land_use.geojson
-tippecanoe --force --drop-rate g -z12 -Z0 --layer CountryBoundary --output country_boundary.pmtiles country_boundary_osm.geojson
-tippecanoe --force --drop-rate g -z12 -Z0 --output international.pmtiles international.geojson
-tippecanoe --force --drop-rate g -z12 -Z0 --output land_water.pmtiles landwater.geojson
-tippecanoe --force --drop-rate g -z12 -Z0 --layer country-boundaries --output countries.pmtiles country-boundaries.geojson
-tippecanoe --force --drop-rate g -z12 -Z0 --layer ocean --output ocean.pmtiles ocean.geojson
-tile-join --force --output basemaps.pmtiles countries.pmtiles land_water.pmtiles land_use.pmtiles international.pmtiles ocean.pmtiles country_boundary.pmtiles"
 
 tippecanoe --force --drop-rate g -z12 -Z0 --output basemaps.pmtiles --name "Base Maps" --description "Base Map with multiple layers" \
 	-L'{"file":"country_boundary_osm.geojson", "layer":"CountryBoundary", "description":"KSA country boundary from OSM covers water boundary"}' \
@@ -30,8 +26,3 @@ tippecanoe --force --drop-rate g -z12 -Z0 --output basemaps.pmtiles --name "Base
 	-L'{"file":"landwater.geojson", "layer":"landwater", "description":"Natural Landscape of KSA"}' \
 	-L'{"file":"country-boundaries.geojson", "layer":"country-boundaries", "description":"Boundary of all countries in the World"}' \
 	-L'{"file":"ocean.geojson", "layer":"ocean", "description":"Ocean area for all the World"}'
-	
-tippecanoe --force --drop-rate g  -z12 -Z0 --output administrative.pmtiles --name "Administrative Layers" --description "Country, Emirate, Governorate with boundaries and labels" \
-	-L'{"file":"country_boundary_osm.geojson", "layer":"CountryBoundary", "description":"KSA country boundary from OSM covers water boundary"}' \
-Emirate.geojson Governorate.geojson Emirate_Label.geojson Governorate_Label.geojson	
-	

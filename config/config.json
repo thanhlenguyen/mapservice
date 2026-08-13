@@ -95,14 +95,14 @@
       "city_district_zone": {
       "pmtiles": "city_district_zone.pmtiles"
     },
-    "address_layer": {
-      "pmtiles": "address_layer.pmtiles"
-    },
     "street_centerline": {
       "pmtiles": "street_centerline.pmtiles"
     },
-    "main_street": {
-      "pmtiles": "main_street.pmtiles"
+    "address_layer": {
+      "pmtiles": "address_layer.pmtiles"
+    },
+    "personal_address": {
+      "pmtiles": "personal_address.pmtiles"
     },
     "building_floors": {
       "pmtiles": "building_floors.pmtiles"
