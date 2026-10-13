@@ -30,6 +30,21 @@ mapservice
 │   └── index.html
 
 ```
+## Parameter to convert to pmtiles or mbtiles
+```
+tippecanoe --force --no-clipping --layer Short_Address -z16 -Z14 --output address_layer.pmtiles Riyadh.geojson Makkah.geojson Group1ENN.geojson Group2ABJJ.geojson Group3HMQT.geojson
+
+tippecanoe --force --drop-rate g  -z12 -Z4 --output administrative.pmtiles Emirate.geojson Governorate.geojson Emirate_Label.geojson Governorate_Label.geojson
+
+tippecanoe --force --no-clipping  -z13 -Z9 --output city_district_zone.pmtiles CityBoundary.geojson CityCenter.geojson District.geojson ZipCode.geojson
+
+tippecanoe --force --drop-densest-as-needed --layer Street -z15 -Z5 --output street.pmtiles Street.geojson
+
+tippecanoe --force --no-clipping --layer Personalize_Address -z16 -Z12 --output personal_address.mbtiles 'PersonalizeAddress.geojson'
+
+tippecanoe --force --drop-rate g  -z12 -Z1 --output  basemaps1.pmtiles country-boundaries.geojson international.geojson landwater.geojson land_use.geojson
+```
+
 ## 1. TileServer, Martin (+Postgis), Nginx (focus on tileserver) 
 - Tileserver manages MBTiles layers (static layers)
 - Martin manages dynamic layers

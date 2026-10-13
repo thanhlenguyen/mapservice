@@ -1,4 +1,6 @@
 # In your routing-api folder
 psycopg2-binary
-flask
-flask-cors
+fastapi
+httpx
+pydantic
+uvicorn[standard]

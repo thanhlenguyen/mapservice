@@ -7,13 +7,14 @@
 #     - "Visit all these locations in the most efficient order (TSP)?"
 #     - "Where is the nearest hospital from my location?"
 #     - "How far can I drive in 5 minutes from here?"
+#     - "How do I get from Room A to Room B, possibly across floors?"
 #
 # HOW IT WORKS:
 #   1. A client (browser, mobile app) sends an HTTP request to an endpoint.
 #   2. This server validates the inputs, queries a PostgreSQL/PostGIS database
-#      that has road network data loaded, and returns GeoJSON results.
+#      that has road network / indoor navigation data loaded, and returns
+#      GeoJSON results.
 #   3. The client displays the results on a map (e.g. Leaflet, Mapbox).
-
 #
 # KEY TECHNOLOGIES:
 #   - FastAPI    : modern, fast (high-performance) web framework for building APIs with Python
@@ -29,6 +30,13 @@
 #   - One-to-many Dijkstra (single DB call instead of a loop for nearest facility)
 #   - Cost matrix for TSP (single DB call for all pairwise distances)
 #   - Single UNION ALL geometry fetch for TSP legs (one round-trip to DB)
+#
+# NOTE ON STRUCTURE: the indoor navigation endpoints (Section: INDOOR
+# NAVIGATION, near the bottom) used to live in a separate indoor_routes.py
+# imported via APIRouter. That file imported db_connection/_not_found/
+# _bad_request back from this module, which created a circular import at
+# startup. Everything now lives in this single file instead — simplest fix,
+# and there's no real benefit to splitting it out for a project this size.
 # =============================================================================
 
 from contextlib import asynccontextmanager, contextmanager  # for the "with db_connection()" pattern
@@ -109,8 +117,8 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="Geo-Routing API",
-    description="Point-to-point routing, TSP, nearest facility, and service area using pgRouting.",
-    version="2.0.0",
+    description="Point-to-point routing, TSP, nearest facility, service area, and indoor navigation using pgRouting.",
+    version="2.1.0",
     lifespan=lifespan,
 )
 
@@ -1051,6 +1059,283 @@ def service_area(
         raise
     except Exception:
         logger.exception("Service area error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
+
+
+# ===========================================================================
+# INDOOR NAVIGATION
+#
+# Folded directly into this file (rather than a separate router module) to
+# avoid the circular-import problem: these endpoints need db_connection,
+# _not_found, and _bad_request, which are already defined above in this
+# same file, so there's nothing to import back and forth.
+#
+# Rooms are identified by the surrogate `id` (indoor.units.id), NOT by
+# UNIT_ID — UNIT_ID repeats in the source data (e.g. multiple "MALE TOILET"
+# rooms on the same floor share the exact same UNIT_ID string), so it can
+# never safely identify a single room. Use GET /indoor/search to resolve a
+# user's text query to a specific `id` before calling GET /indoor/route.
+# ===========================================================================
+
+# Must match the walking speed used in 03_full_sql_pipeline.sql (1.2 m/s) —
+# used only to convert stored edge cost (seconds) back into an approximate
+# distance (meters) for the API response. Not used in any routing calculation.
+WALK_SPEED_MPS_APPROX = 1.2
+
+
+def _entry_node_for_id(cur, unit_pk: int):
+    cur.execute("SELECT entry_node_id, level_id, unit_address, name, name_long, unit_id "
+                "FROM indoor.units WHERE id = %s", (unit_pk,))
+    row = cur.fetchone()
+    if not row or row["entry_node_id"] is None:
+        return None
+    return row
+
+
+@app.get("/indoor/search", summary="Search rooms by unit_address, name/unit_id (disambiguated by surrogate id)")
+def indoor_search(
+    q: str = Query(..., min_length=1, description="Free-text query, matched against unit_address/name/name_long/unit_id"),
+    level_id: str | None = Query(None, description="Optionally restrict to one floor"),
+    limit: int = Query(10, ge=1, le=50),
+):
+    """
+    Returns candidate rooms with their surrogate `id` — use that id (not
+    unit_id) when calling /indoor/route. This exists because UNIT_ID is not
+    unique in the source data, so searching directly against your existing
+    Elasticsearch index (built from raw UNIT_ID values) can't disambiguate
+    which physical room the user means.
+    """
+    try:
+        with db_connection() as conn:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            like = f"%{q}%"
+            params = [like, like, like, like]
+            level_clause = ""
+            if level_id:
+                level_clause = "AND level_id = %s"
+                params.append(level_id)
+            params.append(limit)
+
+            cur.execute(f"""
+                SELECT id, unit_id, unit_address, name, name_long, level_id, use_type, category
+                FROM indoor.units
+                WHERE (unit_address ILIKE %s OR name ILIKE %s OR name_long ILIKE %s OR unit_id ILIKE %s)
+                {level_clause}
+                ORDER BY use_type, unit_address
+                LIMIT %s
+            """, params)
+            rows = cur.fetchall()
+            cur.close()
+        return {"count": len(rows), "results": rows}
+    except Exception:
+        logger.exception("indoor_search error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
+
+
+@app.get("/indoor/units/{level_id}", summary="List all rooms/units on a floor")
+def indoor_list_units(level_id: str):
+    """Returns all room polygons for one floor — useful for drawing the
+    floor plan layer and for populating a room picker in the UI. Each
+    feature's properties include the surrogate `id` needed by /indoor/route."""
+    try:
+        with db_connection() as conn:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("""
+                SELECT id, unit_id, unit_address, name, name_long, use_type, category,
+                       ST_AsGeoJSON(geom) AS geojson
+                FROM indoor.units WHERE level_id = %s
+            """, (level_id,))
+            rows = cur.fetchall()
+            cur.close()
+
+        features = [{
+            "type": "Feature",
+            "geometry": json.loads(r["geojson"]),
+            "properties": {
+                "id": r["id"], "unit_id": r["unit_id"], "unit_address": r["unit_address"], 
+                "name": r["name"], "name_long": r["name_long"],
+                "use_type": r["use_type"], "category": r["category"],
+            },
+        } for r in rows]
+
+        return {"type": "FeatureCollection", "features": features, "count": len(features)}
+    except Exception:
+        logger.exception("indoor_list_units error")
+        raise HTTPException(status_code=500, detail="Internal server error.")
+
+
+@app.get("/indoor/route", summary="Route between two rooms (possibly across floors)")
+def indoor_route(
+    start_id: int = Query(..., description="Surrogate id (indoor.units.id) of the starting room"),
+    end_id:   int = Query(..., description="Surrogate id (indoor.units.id) of the destination room"),
+):
+    """
+    Routes from one room to another, automatically crossing floors via
+    stairs/elevators when needed.
+
+    Response:
+        {
+          total_distance_m, total_time_min,
+          segments: [ { level_id, features: [...], distance_m }, ... ],  # one per floor visited
+          transitions: [ { from_level, to_level, via_use_type, via_name }, ... ]
+        }
+    """
+    try:
+        with db_connection() as conn:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SET statement_timeout = '15s'")
+
+            start = _entry_node_for_id(cur, start_id)
+            end   = _entry_node_for_id(cur, end_id)
+            if not start:
+                _not_found(f"Room id {start_id} has no routable entry point "
+                           f"(check it's within reach of a derived corridor).")
+            if not end:
+                _not_found(f"Room id {end_id} has no routable entry point "
+                           f"(check it's within reach of a derived corridor).")
+            if start_id == end_id:
+                _bad_request("Start and end are the same room.")
+
+            # Whole-building graph is small enough (a few thousand edges) to
+            # route against directly — no bounding box needed, unlike the
+            # outdoor road network.
+            cur.execute("""
+                SELECT seq, node, edge, agg_cost
+                FROM pgr_dijkstra(
+                    'SELECT id, source, target, cost, reverse_cost FROM indoor.edges',
+                    %s, %s, directed => false
+                )
+                ORDER BY seq
+            """, (start["entry_node_id"], end["entry_node_id"]))
+            path = cur.fetchall()
+
+            if not path or len(path) < 2:
+                _not_found("No indoor route found between these two rooms.")
+
+            edge_ids = [r["edge"] for r in path if r["edge"] != -1]
+            if not edge_ids:
+                _not_found("No indoor route found between these two rooms.")
+
+            cur.execute("""
+                SELECT id, source, target, cost, edge_type, level_id,
+                       from_level_id, to_level_id, group_id,
+                       ST_AsGeoJSON(geom) AS geojson
+                FROM indoor.edges WHERE id = ANY(%s)
+            """, (edge_ids,))
+            edges_by_id = {r["id"]: r for r in cur.fetchall()}
+
+            # Each floor's elevation above ground — same "base" value used by
+            # the frontend's addHighlightAndAnimate() to extrude room
+            # highlights, so the route ribbon lines up with the actual floor.
+            cur.execute("""
+                SELECT level_id, AVG(base) AS base_height
+                FROM indoor.units
+                WHERE base IS NOT NULL
+                GROUP BY level_id
+            """)
+            level_base_heights = {r["level_id"]: float(r["base_height"]) for r in cur.fetchall()}
+
+            cur.close()
+
+        # Walk the path in order, grouping consecutive edges by floor and
+        # recording each stair/elevator crossing as a transition.
+        segments: dict[str, dict] = {}
+        segment_order: list[str] = []
+        transitions = []
+        total_distance_m = 0.0
+        total_cost = 0.0
+
+        for r in path:
+            if r["edge"] == -1:
+                continue
+            e = edges_by_id[r["edge"]]
+            total_cost += r["agg_cost"] or 0
+
+            if e["edge_type"] == "vertical":
+                # Look up a friendly name for the connector used
+                via_name = None
+                anchor_lon = anchor_lat = None
+
+                with db_connection() as conn2:
+                    c2 = conn2.cursor(cursor_factory=RealDictCursor)
+                    # Prefer the unit polygon on the FROM floor as the anchor — it's a
+                    # real room geometry that's guaranteed to exist, unlike edge geom
+                    # which is often NULL/degenerate for vertical connectors.
+                    c2.execute("""
+                        SELECT name, use_type,
+                            ST_X(ST_Centroid(geom)) AS lon,
+                            ST_Y(ST_Centroid(geom)) AS lat
+                        FROM indoor.units
+                        WHERE vertical_group_id = %s AND level_id = %s
+                        LIMIT 1
+                    """, (e["group_id"], e["from_level_id"]))
+                    row = c2.fetchone()
+
+                    if not row:
+                        # Fallback: any unit in the group, any floor (still same x,y shaft)
+                        c2.execute("""
+                            SELECT name, use_type,
+                                ST_X(ST_Centroid(geom)) AS lon,
+                                ST_Y(ST_Centroid(geom)) AS lat
+                            FROM indoor.units
+                            WHERE vertical_group_id = %s
+                            LIMIT 1
+                        """, (e["group_id"],))
+                        row = c2.fetchone()
+
+                    c2.close()
+                    if row:
+                        via_name = row
+                        anchor_lon, anchor_lat = row["lon"], row["lat"]       
+                    if anchor_lon is None:
+                        logger.warning(
+                            "No anchor coords for vertical edge id=%s group_id=%s from=%s to=%s",
+                            e["id"], e["group_id"], e["from_level_id"], e["to_level_id"]
+                         )          
+
+                transitions.append({
+                    "from_level": e["from_level_id"],
+                    "to_level": e["to_level_id"],
+                    "via_name": via_name["name"] if via_name else None,
+                    "via_use_type": via_name["use_type"] if via_name else None,
+
+                    "base_from": level_base_heights.get(e["from_level_id"], 0.0),
+                    "base_to":   level_base_heights.get(e["to_level_id"], 0.0),
+                    "lon": anchor_lon,
+                    "lat": anchor_lat,
+                })
+                continue
+
+            level = e["level_id"]
+            if level not in segments:
+                segments[level] = {"level_id": level, "features": [], "distance_m": 0.0, "base_height": level_base_heights.get(level, 0.0),}
+                segment_order.append(level)
+            if e["geojson"]:
+                segments[level]["features"].append({
+                    "type": "Feature", "geometry": json.loads(e["geojson"]),
+                    "properties": {"edge_type": e["edge_type"]},
+                })
+            # cost is stored as time in seconds (length_m / WALK_SPEED_MPS), so
+            # convert back to an approximate distance for the response.
+            seg_distance = (e["cost"] or 0) * WALK_SPEED_MPS_APPROX
+            segments[level]["distance_m"] += seg_distance
+            total_distance_m += seg_distance
+
+        return {
+            "start_id": start_id, "end_id": end_id,
+            "start_unit_id": start["unit_id"], "end_unit_id": end["unit_id"],
+            "start_unit_address": start["unit_address"], "end_unit_address": end["unit_address"],
+            "total_distance_m": round(total_distance_m, 1),
+            "total_time_min": round(total_cost / 60, 1),
+            "floors_involved": segment_order,
+            "segments": [segments[lv] for lv in segment_order],
+            "transitions": transitions,
+        }
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Indoor route error")
         raise HTTPException(status_code=500, detail="Internal server error.")
 
 

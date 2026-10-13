@@ -1,4 +1,4 @@
-, for# Self-Hosted Map System using PostGIS, Martin, and TileServer-GL
+# Self-Hosted Map System using PostGIS, Martin, and TileServer-GL
 
 This guide outlines the steps to replace Mapbox in a localhost environment using a stack of open-source tools for serving static and dynamic vector tiles, and integrating a custom geocoding/POI search and an AI-powered API layer.
 
@@ -8,7 +8,7 @@ We will use Docker Compose to manage all services (PostGIS, Martin, TileServer-G
 
 - Table structure
 ```
-mapserver/
+mapservice/
 ├── docker-compose.yml          # Orchestrates PostGIS, Martin, and TileServer-GL
 ├── .env                        # Environment variables for security (DB creds, etc.)
 ├── martin-config.yml           # Martin configuration for PostGIS sources
@@ -621,7 +621,7 @@ CREATE TABLE pois (
 ```
 1. Prepare data
 - Prepare GeoJSON, shapefiles, or CSV with geometry (e.g., latitude/longitude or WKT)
-- Save data in your project directory, e.g., /mnt/d/Git/mapserver/data/
+- Save data in your project directory, e.g., /mnt/d/Git/mapservice/data/
 2. Enable PostGIS Extension
 Ensure the PostGIS extension is enabled in your database for geospatial functionality.
 
@@ -644,7 +644,7 @@ Use ogr2ogr to load into PostGIS:
 ```bash
 ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" \
 -nln topology.places -nlt PROMOTE_TO_MULTI -lco GEOMETRY_NAME=geom \
-/mnt/d/Git/mapserver/data/pois.geojson
+/mnt/d/Git/mapservice/data/pois.geojson
 ```
 Options:
 ```bash
@@ -656,7 +656,7 @@ Options:
 ```bash
 ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" \
 -nln topology.places -nlt PROMOTE_TO_MULTI -lco GEOMETRY_NAME=geom \
-/mnt/d/Git/mapserver/data/sample.shp
+/mnt/d/Git/mapservice/data/sample.shp
 ```
 - Import CSV with Lat/Lon:
 If you have a CSV (e.g., pois.csv with columns name, lat, lon):
@@ -664,7 +664,7 @@ If you have a CSV (e.g., pois.csv with columns name, lat, lon):
   - Copy to PostGIS:
 ```bash
 sql -h localhost -U le -d geodb -W -c \
-"\COPY topology.places (name, lat, lon) FROM '/mnt/d/Git/mapserver/data/pois.csv' DELIMITER ',' CSV HEADER;"
+"\COPY topology.places (name, lat, lon) FROM '/mnt/d/Git/mapservice/data/pois.csv' DELIMITER ',' CSV HEADER;"
 ```
   - Add geometry column:
 ```sql
@@ -681,7 +681,7 @@ ogr2ogr:
   -nln topology.places -nlt PROMOTE_TO_MULTI -lco GEOMETRY_NAME=geom \
   /data/pois.geojson
   volumes:
-    - /mnt/d/Git/mapserver/data:/data
+    - /mnt/d/Git/mapservice/data:/data
   depends_on:
     - postgis
 ```
@@ -944,7 +944,7 @@ Download: [Saudi Arabia Roads (OSM Export)](https://data.humdata.org/dataset/hot
 3. Import to PostGIS (runs on host, connects to your container)
 - Use ogr2ogr to import data
 ```bash
-ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" -nln topology.ways_raw -nlt PROMOTE_TO_MULTI -overwrite -lco GEOMETRY_NAME=geom /mnt/d/Git/mapserver/data/streets_riyadh.geojson
+ogr2ogr -f PostgreSQL PG:"host=localhost user=le password=123456 dbname=geodb" -nln topology.ways_raw -nlt PROMOTE_TO_MULTI -overwrite -lco GEOMETRY_NAME=geom /mnt/d/Git/mapservice/data/streets_riyadh.geojson
 ```
 - In QGIS, we can use `Database -> DB Manager` to connect with PostgreSQL to import data
   

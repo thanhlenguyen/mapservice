@@ -1,6 +1,6 @@
 keep_alive: 75
 listen_addresses: '0.0.0.0:3000'
-base_path: /tiles
+base_path: 
 worker_processes: 8
 cache_size_mb: 1024
 preferred_encoding: gzip
@@ -15,12 +15,13 @@ cors:
   max_age: 3600
 
 postgres:
-  connection_string: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgis:5432/${POSTGRES_DB}?sslmode=disable"
+  connection_string: ${DATABASE_URL}
   default_srid: 4326
   auto_publish:
     tables:
       from_schemas:
         - topology
+        - indoor
       source_id_format: '{schema}.{table}'
       id_columns: id
       clip_geom: true
@@ -47,15 +48,14 @@ mbtiles:
 
 sprites:
   cache_size_mb: 64
-
   paths:
-  # - /sprites
+  - /sprites
   sources:
 
 fonts:
   cache_size_mb: 64
   paths:
-  # - /fonts
+  - /fonts
 
 styles:
   paths:

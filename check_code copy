@@ -1,0 +1,224 @@
+// ============================================================================
+// SECTION 10b: INDOOR ROUTE MODE
+// ============================================================================
+
+const INDOOR_API = `${BACKEND_URL}/indoor`;
+
+state.indoor = {
+    startId: null, endId: null,   // surrogate ids (indoor.units.id), NOT unit_id
+    lastRouteData: null,
+    currentFloorIndex: 0,
+};
+
+function initIndoorSearch(inputId, resultsId, onPick) {
+    const input = document.getElementById(inputId);
+    const results = document.getElementById(resultsId);
+    let debounceTimer;
+    input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+            const q = input.value.trim();
+            if (!q) { results.innerHTML = ''; return; }
+            try {
+                const data = await fetchWithTimeout(
+                    `${INDOOR_API}/search?q=${encodeURIComponent(q)}&limit=8`
+                );
+                results.innerHTML = '';
+                data.results.forEach(r => {
+                    const item = document.createElement('div');
+                    item.className = 'result-item';
+
+                    // Prefer unit_address as the headline — it's often absent
+                    // for rooms without a formal address (elevators, plant
+                    // rooms, etc.), so fall back to name, then unit_id.
+                    const primary = r.unit_address || r.name || r.unit_id;
+
+                    // Build the subtitle from whatever adds NEW information —
+                    // skip name if it's already shown as the headline, skip
+                    // empty fields, so nothing repeats.
+                    const subtitleParts = [r.level_id.replace('SPL.HQ.', '')];
+                    if (r.name && r.name !== primary) subtitleParts.push(r.name);
+                    if (r.use_type) subtitleParts.push(r.use_type);
+
+                    item.innerHTML = `<strong>${primary}</strong><br>
+                        <small>${subtitleParts.join(' · ')}</small>`;
+                    item.onclick = () => {
+                        onPick(r.id, r.level_id, primary);
+                        input.value = `${primary} (${r.level_id.replace('SPL.HQ.', '')})`;
+                        results.innerHTML = '';
+                    };
+                    results.appendChild(item);
+                });
+            } catch (err) {
+                console.error('Indoor search error:', err);
+            }
+        }, 300);
+    });
+}
+
+function setupIndoorMode() {
+    initIndoorSearch('indoor-start-search', 'indoor-start-results', (id) => {
+        state.indoor.startId = id;
+        maybeCalculateIndoorRoute();
+    });
+    initIndoorSearch('indoor-end-search', 'indoor-end-results', (id) => {
+        state.indoor.endId = id;
+        maybeCalculateIndoorRoute();
+    });
+}
+
+function maybeCalculateIndoorRoute() {
+    if (state.indoor.startId && state.indoor.endId) calculateIndoorRoute();
+}
+
+async function calculateIndoorRoute() {
+    showInfo('⏳ Calculating indoor route...');
+    try {
+        const url = `${INDOOR_API}/route?start_id=${state.indoor.startId}&end_id=${state.indoor.endId}`;
+        const data = await fetchWithTimeout(url);
+        if (data.error) throw new Error(data.error);
+
+        state.indoor.lastRouteData = data;
+        state.indoor.currentFloorIndex = 0;
+        renderIndoorFloorSwitcher(data.floors_involved);
+
+        // Indoor units/routes only exist in the BDF style layers — switch to
+        // it first (same pattern zoomToFeature() uses for search results),
+        // then draw once the new style has finished loading.
+        switchToIndoorStyleThen(() => renderIndoorFloor(data.floors_involved[0]));
+
+        let summary = `✅ <strong>Indoor route:</strong> ${data.total_time_min} min • ${data.total_distance_m} m`;
+        if (data.transitions.length > 0) {
+            summary += '<br>' + data.transitions.map(t =>
+                `🔀 ${t.via_use_type || 'transition'} ${t.via_name || ''}: ${t.from_level} → ${t.to_level}`
+            ).join('<br>');
+        }
+        showInfo(summary);
+    } catch (error) {
+        handleError('Indoor route', error);
+    }
+}
+
+/**
+ * Ensure the BDF style (the one with indoor data layers) is active before
+ * running `callback`. If a style switch is needed, setStyle() wipes all
+ * custom sources/layers, so we wait for 'idle' before drawing anything —
+ * same approach zoomToFeature() uses.
+ */
+function switchToIndoorStyleThen(callback) {
+    const bdfStyle = STYLES.find(s => s.id === 'bdf-style');
+    if (currentStyleId !== 'bdf-style') {
+        state.map.setStyle(bdfStyle.url);
+        currentStyleId = 'bdf-style';
+        state.map.once('idle', () => {
+            if (state.infoPointerActive) setupInfoPointerLayers(); // re-inject if it was active
+            callback();
+        });
+    } else {
+        callback();
+    }
+}
+
+/** Show a small floor tab bar so the user can step through multi-floor routes. */
+function renderIndoorFloorSwitcher(floors) {
+    const container = document.getElementById('indoor-floor-switcher');
+    const buttons = document.getElementById('indoor-floor-buttons');
+    if (floors.length <= 1) { container.classList.add('hidden'); return; }
+
+    container.classList.remove('hidden');
+    buttons.innerHTML = '';
+    floors.forEach((level, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = level.replace('SPL.HQ.', '');
+        btn.className = i === 0 ? 'route-opt-btn active' : 'route-opt-btn';
+        btn.onclick = () => {
+            state.indoor.currentFloorIndex = i;
+            document.querySelectorAll('#indoor-floor-buttons button')
+                .forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            // The layer switcher (or a mode switch) may have moved the map
+            // off BDF style since the initial route draw — re-check here too.
+            switchToIndoorStyleThen(() => renderIndoorFloor(level));
+        };
+        buttons.appendChild(btn);
+    });
+}
+
+/**
+ * Draw one floor's route segment as a thin 3D ribbon sitting at that floor's
+ * actual elevation. Plain 'line' layers ignore GeoJSON z-values and always
+ * render flush with the ground plane regardless of geometry or camera pitch
+ * — that's why a flat line looks disconnected from the pitched BDF building.
+ * Instead, buffer each line into a slim polygon and extrude it with
+ * fill-extrusion, based at the floor's own elevation (`segment.base_height`,
+ * from the API) — the same value addHighlightAndAnimate() uses to extrude
+ * room highlights, so the path visually sits on the correct floor.
+ */
+function renderIndoorFloor(levelId) {
+    clearIndoorLayers();
+    const data = state.indoor.lastRouteData;
+    if (!data) return;
+
+    const segment = data.segments.find(s => s.level_id === levelId);
+    document.getElementById('indoor-current-floor').textContent = levelId.replace('SPL.HQ.', '');
+    if (!segment || segment.features.length === 0) return;
+
+    const RIBBON_WIDTH_M     = 0.4;   // path width
+    const RIBBON_THICKNESS_M = 0.15;  // how tall the ribbon stands above the floor slab
+    const base = segment.base_height ?? 0;
+
+    // turf.buffer() takes a radius, so half the desired total width on each side.
+    const ribbons = segment.features.map(f =>
+        turf.buffer(f, RIBBON_WIDTH_M / 2, { units: 'meters' })
+    );
+
+    state.map.addSource('indoor-route', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: ribbons },
+    });
+    state.map.addLayer({
+        id: 'indoor-route',
+        type: 'fill-extrusion',
+        source: 'indoor-route',
+        paint: {
+            'fill-extrusion-color':   '#059669',
+            'fill-extrusion-opacity': 0.95,
+            'fill-extrusion-base':    base + 0.05,                     // hover just above the slab
+            'fill-extrusion-height':  base + 0.05 + RIBBON_THICKNESS_M,
+        },
+    });
+
+    // Fit with a 3D tilt to match the BDF style's usual camera angle
+    // (mirrors the pitch/bearing addHighlightAndAnimate() uses for search results).
+    const bounds = new maplibregl.LngLatBounds();
+    segment.features.forEach(f => {
+        if (f.geometry?.coordinates) f.geometry.coordinates.forEach(c => bounds.extend(c));
+    });
+    state.map.fitBounds(bounds, {
+        padding: 100, pitch: 60, bearing: -18, maxZoom: 19.5, duration: 1200,
+    });
+}
+
+function clearIndoorLayers() {
+    // 'indoor-route-casing' is only ever present if you're migrating from an
+    // earlier version that drew the route with addRouteLayer() — harmless
+    // no-op if it was never created.
+    ['indoor-route', 'indoor-route-casing'].forEach(id => {
+        if (state.map.getLayer(id))  state.map.removeLayer(id);
+        if (state.map.getSource(id)) state.map.removeSource(id);
+    });
+    // Stop tracking it for the marching-ants animation loop, in case an
+    // earlier render registered it there.
+    animatedRouteLayers = animatedRouteLayers.filter(id => id !== 'indoor-route');
+}
+
+function clearIndoorMode() {
+    clearIndoorLayers();
+    state.indoor.startId = null;
+    state.indoor.endId = null;
+    state.indoor.lastRouteData = null;
+    document.getElementById('indoor-start-search').value = '';
+    document.getElementById('indoor-end-search').value = '';
+    document.getElementById('indoor-floor-switcher').classList.add('hidden');
+}
