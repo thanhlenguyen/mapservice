@@ -1080,11 +1080,11 @@ def service_area(
 # Must match the walking speed used in 03_full_sql_pipeline.sql (1.2 m/s) —
 # used only to convert stored edge cost (seconds) back into an approximate
 # distance (meters) for the API response. Not used in any routing calculation.
-_INDOOR_WALK_SPEED_MPS = 1.2
+WALK_SPEED_MPS_APPROX = 1.2
 
 
 def _entry_node_for_id(cur, unit_pk: int):
-    cur.execute("SELECT entry_node_id, level_id, name, name_long, unit_id "
+    cur.execute("SELECT entry_node_id, level_id, unit_address, name, name_long, unit_id "
                 "FROM indoor.units WHERE id = %s", (unit_pk,))
     row = cur.fetchone()
     if not row or row["entry_node_id"] is None:
@@ -1092,23 +1092,24 @@ def _entry_node_for_id(cur, unit_pk: int):
     return row
 
 
-@app.get("/indoor/search", summary="Search rooms by name/unit_id (disambiguated by surrogate id)")
+@app.get("/indoor/search", summary="Search rooms by unit_address, name/unit_id (disambiguated by surrogate id)")
 def indoor_search(
-    q: str = Query(..., min_length=1, description="Free-text query, matched against name/name_long/unit_id"),
+    q: str = Query(..., min_length=1, description="Free-text query, matched against unit_address/name/name_long/unit_id"),
     level_id: str | None = Query(None, description="Optionally restrict to one floor"),
     limit: int = Query(10, ge=1, le=50),
 ):
     """
     Returns candidate rooms with their surrogate `id` — use that id (not
     unit_id) when calling /indoor/route. This exists because UNIT_ID is not
-    unique in the source data, so a search that returns UNIT_ID alone can't
-    tell two same-named rooms apart.
+    unique in the source data, so searching directly against your existing
+    Elasticsearch index (built from raw UNIT_ID values) can't disambiguate
+    which physical room the user means.
     """
     try:
         with db_connection() as conn:
             cur = conn.cursor(cursor_factory=RealDictCursor)
             like = f"%{q}%"
-            params = [like, like, like]
+            params = [like, like, like, like]
             level_clause = ""
             if level_id:
                 level_clause = "AND level_id = %s"
@@ -1116,11 +1117,11 @@ def indoor_search(
             params.append(limit)
 
             cur.execute(f"""
-                SELECT id, unit_id, name, name_long, level_id, use_type, category
+                SELECT id, unit_id, unit_address, name, name_long, level_id, use_type, category
                 FROM indoor.units
-                WHERE (name ILIKE %s OR name_long ILIKE %s OR unit_id ILIKE %s)
+                WHERE (unit_address ILIKE %s OR name ILIKE %s OR name_long ILIKE %s OR unit_id ILIKE %s)
                 {level_clause}
-                ORDER BY level_id, name
+                ORDER BY use_type, unit_address
                 LIMIT %s
             """, params)
             rows = cur.fetchall()
@@ -1140,7 +1141,7 @@ def indoor_list_units(level_id: str):
         with db_connection() as conn:
             cur = conn.cursor(cursor_factory=RealDictCursor)
             cur.execute("""
-                SELECT id, unit_id, use_type, name, name_long, category,
+                SELECT id, unit_id, unit_address, name, name_long, use_type, category,
                        ST_AsGeoJSON(geom) AS geojson
                 FROM indoor.units WHERE level_id = %s
             """, (level_id,))
@@ -1151,9 +1152,9 @@ def indoor_list_units(level_id: str):
             "type": "Feature",
             "geometry": json.loads(r["geojson"]),
             "properties": {
-                "id": r["id"], "unit_id": r["unit_id"], "use_type": r["use_type"],
+                "id": r["id"], "unit_id": r["unit_id"], "unit_address": r["unit_address"], 
                 "name": r["name"], "name_long": r["name_long"],
-                "category": r["category"],
+                "use_type": r["use_type"], "category": r["category"],
             },
         } for r in rows]
 
@@ -1222,6 +1223,18 @@ def indoor_route(
                 FROM indoor.edges WHERE id = ANY(%s)
             """, (edge_ids,))
             edges_by_id = {r["id"]: r for r in cur.fetchall()}
+
+            # Each floor's elevation above ground — same "base" value used by
+            # the frontend's addHighlightAndAnimate() to extrude room
+            # highlights, so the route ribbon lines up with the actual floor.
+            cur.execute("""
+                SELECT level_id, AVG(base) AS base_height
+                FROM indoor.units
+                WHERE base IS NOT NULL
+                GROUP BY level_id
+            """)
+            level_base_heights = {r["level_id"]: float(r["base_height"]) for r in cur.fetchall()}
+
             cur.close()
 
         # Walk the path in order, grouping consecutive edges by floor and
@@ -1241,39 +1254,77 @@ def indoor_route(
             if e["edge_type"] == "vertical":
                 # Look up a friendly name for the connector used
                 via_name = None
+                anchor_lon = anchor_lat = None
+
                 with db_connection() as conn2:
                     c2 = conn2.cursor(cursor_factory=RealDictCursor)
-                    c2.execute("SELECT use_type, name FROM indoor.units "
-                               "WHERE vertical_group_id = %s LIMIT 1", (e["group_id"],))
+                    # Prefer the unit polygon on the FROM floor as the anchor — it's a
+                    # real room geometry that's guaranteed to exist, unlike edge geom
+                    # which is often NULL/degenerate for vertical connectors.
+                    c2.execute("""
+                        SELECT name, use_type,
+                            ST_X(ST_Centroid(geom)) AS lon,
+                            ST_Y(ST_Centroid(geom)) AS lat
+                        FROM indoor.units
+                        WHERE vertical_group_id = %s AND level_id = %s
+                        LIMIT 1
+                    """, (e["group_id"], e["from_level_id"]))
                     row = c2.fetchone()
+
+                    if not row:
+                        # Fallback: any unit in the group, any floor (still same x,y shaft)
+                        c2.execute("""
+                            SELECT name, use_type,
+                                ST_X(ST_Centroid(geom)) AS lon,
+                                ST_Y(ST_Centroid(geom)) AS lat
+                            FROM indoor.units
+                            WHERE vertical_group_id = %s
+                            LIMIT 1
+                        """, (e["group_id"],))
+                        row = c2.fetchone()
+
                     c2.close()
                     if row:
                         via_name = row
+                        anchor_lon, anchor_lat = row["lon"], row["lat"]       
+                    if anchor_lon is None:
+                        logger.warning(
+                            "No anchor coords for vertical edge id=%s group_id=%s from=%s to=%s",
+                            e["id"], e["group_id"], e["from_level_id"], e["to_level_id"]
+                         )          
+
                 transitions.append({
-                    "from_level": e["from_level_id"], "to_level": e["to_level_id"],
-                    "via_use_type": via_name["use_type"] if via_name else None,
+                    "from_level": e["from_level_id"],
+                    "to_level": e["to_level_id"],
                     "via_name": via_name["name"] if via_name else None,
+                    "via_use_type": via_name["use_type"] if via_name else None,
+
+                    "base_from": level_base_heights.get(e["from_level_id"], 0.0),
+                    "base_to":   level_base_heights.get(e["to_level_id"], 0.0),
+                    "lon": anchor_lon,
+                    "lat": anchor_lat,
                 })
                 continue
 
             level = e["level_id"]
             if level not in segments:
-                segments[level] = {"level_id": level, "features": [], "distance_m": 0.0}
+                segments[level] = {"level_id": level, "features": [], "distance_m": 0.0, "base_height": level_base_heights.get(level, 0.0),}
                 segment_order.append(level)
             if e["geojson"]:
                 segments[level]["features"].append({
                     "type": "Feature", "geometry": json.loads(e["geojson"]),
                     "properties": {"edge_type": e["edge_type"]},
                 })
-            # cost is stored as time in seconds (length_m / walk speed), so
+            # cost is stored as time in seconds (length_m / WALK_SPEED_MPS), so
             # convert back to an approximate distance for the response.
-            seg_distance = (e["cost"] or 0) * _INDOOR_WALK_SPEED_MPS
+            seg_distance = (e["cost"] or 0) * WALK_SPEED_MPS_APPROX
             segments[level]["distance_m"] += seg_distance
             total_distance_m += seg_distance
 
         return {
             "start_id": start_id, "end_id": end_id,
             "start_unit_id": start["unit_id"], "end_unit_id": end["unit_id"],
+            "start_unit_address": start["unit_address"], "end_unit_address": end["unit_address"],
             "total_distance_m": round(total_distance_m, 1),
             "total_time_min": round(total_cost / 60, 1),
             "floors_involved": segment_order,

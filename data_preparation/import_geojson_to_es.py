@@ -4,8 +4,9 @@ from elasticsearch import Elasticsearch, helpers
 # Connect to ES (update host if not localhost: http://localhost:9200, dev host: https://non-prd-elastic-mapservice.address.gov.sa/)
 es = Elasticsearch(["http://localhost:9200"])
 
-geojson_file = "UnitSample.geojson"  # Path to your GeoJSON file
-index = "buildings_vertical"  # Target ES index name
+geojson_file = "/mnt/d/Git/mapserver/data/Units.geojson"  # Path to your GeoJSON file
+# path for windows: r"D:\Git\mapserver\data\Units.geojson"
+index = "building_units"  # Target ES index name
 
 # Load GeoJSON
 with open(geojson_file, "r") as f:  # Replace with your file path

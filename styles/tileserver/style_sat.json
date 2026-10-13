@@ -26,7 +26,7 @@
     "esri-satellite": {
       "type": "raster",
       "tiles": [
-        "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        "https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=AAPTaJx8D5XOageGWeJHNCTIiCg..C5qF-KqzWkpUR0juvTBYKUtRu3RfIrD6bES9c2gu7WMlw6d6FqpWVwtjmtp-By6LY-qedDajO8E0AiMottUQdwMp8_lUZgaQV-Dc47kn2wNz5w3xDwOofYqMup9RurNFBMLXDv3-CtEU1VYks6ku-RqKJ4OEMbHoZzFQghGveq1Fq30K7wKXe0ChCBOnTFIrtQfQQUDnP-sqf0384mOhPTZUSYwd62nGJZAbOrIyGugTf45TumdQKA..AT1_J9Q3Gxhn"
       ],
       "tileSize": 256,
       "attribution": "© Esri, Maxar, Earthstar Geographics"

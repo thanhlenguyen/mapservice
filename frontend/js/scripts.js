@@ -147,10 +147,14 @@ const state = {
 
 // Module-level variables that don't need to live inside the state object.
 let currentDataset     = 'spl_units';   // Elasticsearch index: 'spl_units' or vertical addresses
-let currentStyleId     = 'basic-style'; // ID of the currently active map style
+let currentStyleId     = 'def-style'; // ID of the currently active map style
 let currentHighlightIds = [];           // Layer IDs for 3D search highlights (for cleanup)
 let currentPopup        = null;         // The currently open maplibregl.Popup instance
 let facilitySearchId    = 0;            // Incremented each search to discard stale responses
+
+// --- Route "marching ants" animation state ---
+let routeAnimFrameId    = null;          // requestAnimationFrame handle, so it can be cancelled
+let animatedRouteLayers = [];            // layer ids currently animated (route-0, tsp-segment-1, ...)
 
 
 // ============================================================================
@@ -299,7 +303,7 @@ async function switchMapStyle(style) {
             case 'service':  restoreServiceArea();  break;
             case 'indoor':
                 if (state.indoor.lastRouteData) {
-                    renderIndoorFloor(state.indoor.lastRouteData.floors_involved[state.indoor.currentFloorIndex]);
+                    renderIndoorRouteFull(); // was renderIndoorFloor(state.indoor.lastRouteData.floors_involved[state.indoor.currentFloorIndex]);
                 }
                 break;
         }
@@ -713,15 +717,19 @@ async function calculateRoute(start, end) {
         // Save so we can redraw after a style switch without a new API call.
         state.lastRouteData = routes;
 
-        // Draw each alternative; the primary route is thicker and more opaque.
-        routes.forEach((route, i) => {
-            const color = ROUTE_COLORS[i] || '#5e8bbe';
-            const opacity = i === 0 ? 0.9 : 0.6;   // Primary route more opaque
-            const width = i === 0 ? 7 : 5;          // Primary route thicker
-            addRouteLayer(route, color, opacity, width, `route-${i}`);
-        });
+        // Open BDF style (3D pitch). If a switch happened, restoreRouteLayers
+        // already drew the path with ants; otherwise draw now.
+        const switched = await ensureBdfStyle();
+        if (!switched) {
+            routes.forEach((route, i) => {
+                const color = ROUTE_COLORS[i] || '#5e8bbe';
+                const opacity = i === 0 ? 0.9 : 0.6;
+                const width = i === 0 ? 7 : 5;
+                addRouteLayer(route, color, opacity, width, `route-${i}`, true);
+            });
+        }
 
-        // Fit the viewport to all drawn routes.
+        // Fit the viewport to all drawn routes (keeps current pitch/bearing).
         routes.length > 1 ? fitToMultipleRoutes(routes) : fitToFeatures(routes[0]);
 
         // Build a summary with color swatches so the user can match text to lines.
@@ -841,8 +849,13 @@ async function calculateTSP() {
             segments:       data.segments,
             waypoint_order: data.waypoint_order
         };
-        // Draw each leg segment with the color of its STARTING waypoint.
-        drawTSPSegments(data.segments, data.waypoint_order);
+
+        // Open BDF style (3D). If a switch happened, restoreTSPRoute already
+        // drew the segments; otherwise draw them now with ants.
+        const switched = await ensureBdfStyle();
+        if (!switched) {
+            drawTSPSegments(data.segments, data.waypoint_order);
+        }
 
         // Fit map to the first segment's bounds (rough but fast)
         if (data.segments?.length > 0) fitToFeatures(data.segments[0]);
@@ -1261,11 +1274,24 @@ function initIndoorSearch(inputId, resultsId, onPick) {
                 data.results.forEach(r => {
                     const item = document.createElement('div');
                     item.className = 'result-item';
-                    item.innerHTML = `<strong>${r.name || r.unit_id}</strong><br>
-                        <small>${r.level_id.replace('SPL.HQ.', '')} · ${r.use_type || ''}</small>`;
+
+                    // Prefer unit_address as the headline — it's often absent
+                    // for rooms without a formal address (elevators, plant
+                    // rooms, etc.), so fall back to name, then unit_id.
+                    const primary = r.unit_address || r.name || r.unit_id;
+
+                    // Build the subtitle from whatever adds NEW information —
+                    // skip name if it's already shown as the headline, skip
+                    // empty fields, so nothing repeats.
+                    const subtitleParts = [r.level_id ? r.level_id.replace('SPL.HQ.', '') : 'Unknown floor'];
+                    if (r.name && r.name !== primary) subtitleParts.push(r.name);
+                    if (r.use_type) subtitleParts.push(r.use_type);
+
+                    item.innerHTML = `<strong>${primary}</strong><br>
+                        <small>${subtitleParts.join(' · ')}</small>`;
                     item.onclick = () => {
-                        onPick(r.id, r.level_id, r.name || r.unit_id);
-                        input.value = `${r.name || r.unit_id} (${r.level_id.replace('SPL.HQ.', '')})`;
+                        onPick(r.id, r.level_id, primary);
+                        input.value = `${primary}${r.level_id ? ' (' + r.level_id.replace('SPL.HQ.', '') + ')' : ''}`;
                         results.innerHTML = '';
                     };
                     results.appendChild(item);
@@ -1302,7 +1328,17 @@ async function calculateIndoorRoute() {
         state.indoor.lastRouteData = data;
         state.indoor.currentFloorIndex = 0;
         renderIndoorFloorSwitcher(data.floors_involved);
-        renderIndoorFloor(data.floors_involved[0]);
+
+        // Indoor units/routes only exist in the BDF style layers — switch to
+        // it first (same pattern zoomToFeature() uses for search results),
+        // then draw once the new style has finished loading.
+        //  only try to render a floor if one exists
+        if (data.floors_involved.length > 0) {
+            switchToIndoorStyleThen(() => renderIndoorRouteFull());   // was renderIndoorFloor(data.floors_involved[0])
+        } else {
+            showInfo(`✅ <strong>Indoor route:</strong> ${data.total_time_min} min • ${data.total_distance_m} m` +
+                    `<br>Direct transition — no floor to display.`);
+        }
 
         let summary = `✅ <strong>Indoor route:</strong> ${data.total_time_min} min • ${data.total_distance_m} m`;
         if (data.transitions.length > 0) {
@@ -1313,6 +1349,26 @@ async function calculateIndoorRoute() {
         showInfo(summary);
     } catch (error) {
         handleError('Indoor route', error);
+    }
+}
+
+/**
+ * Ensure the BDF style (the one with indoor data layers) is active before
+ * running `callback`. If a style switch is needed, setStyle() wipes all
+ * custom sources/layers, so we wait for 'idle' before drawing anything —
+ * same approach zoomToFeature() uses.
+ */
+function switchToIndoorStyleThen(callback) {
+    const bdfStyle = STYLES.find(s => s.id === 'bdf-style');
+    if (currentStyleId !== 'bdf-style') {
+        state.map.setStyle(bdfStyle.url);
+        currentStyleId = 'bdf-style';
+        state.map.once('idle', () => {
+            if (state.infoPointerActive) setupInfoPointerLayers(); // re-inject if it was active
+            callback();
+        });
+    } else {
+        callback();
     }
 }
 
@@ -1334,32 +1390,206 @@ function renderIndoorFloorSwitcher(floors) {
             document.querySelectorAll('#indoor-floor-buttons button')
                 .forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            renderIndoorFloor(level);
+            // The layer switcher (or a mode switch) may have moved the map
+            // off BDF style since the initial route draw — re-check here too.
+            // switchToIndoorStyleThen(() => renderIndoorFloor(level)); -- only render for each floor
+            document.getElementById('indoor-current-floor').textContent = level.replace('SPL.HQ.', '');
+            flyToIndoorFloor(level); // camera-only — the full path is already drawn
         };
         buttons.appendChild(btn);
     });
 }
 
-/** Draw one floor's route segment. Call this again whenever the map style switches. */
+/** Fly the camera to one floor's segment bounds without touching any layers. */
+function flyToIndoorFloor(levelId) {
+    const data = state.indoor.lastRouteData;
+    if (!data) return;
+    const segment = data.segments.find(s => s.level_id === levelId);
+    if (!segment || segment.features.length === 0) return;
+
+    const bounds = new maplibregl.LngLatBounds();
+    segment.features.forEach(f => {
+        if (f.geometry?.coordinates) f.geometry.coordinates.forEach(c => bounds.extend(c));
+    });
+    state.map.fitBounds(bounds, { padding: 100, pitch: 60, bearing: -18, maxZoom: 19.5, duration: 1200 });
+}
+
+/**
+ * Draw one floor's route segment as a thin 3D ribbon sitting at that floor's
+ * actual elevation. Plain 'line' layers ignore GeoJSON z-values and always
+ * render flush with the ground plane regardless of geometry or camera pitch
+ * — that's why a flat line looks disconnected from the pitched BDF building.
+ * Instead, buffer each line into a slim polygon and extrude it with
+ * fill-extrusion, based at the floor's own elevation (`segment.base_height`,
+ * from the API) — the same value addHighlightAndAnimate() uses to extrude
+ * room highlights, so the path visually sits on the correct floor.
+ */
 function renderIndoorFloor(levelId) {
     clearIndoorLayers();
     const data = state.indoor.lastRouteData;
     if (!data) return;
 
+    if (!levelId) {
+        // Route was entirely a vertical transition — nothing horizontal to draw
+        document.getElementById('indoor-current-floor').textContent = '—';
+        showInfo('✅ Route is a direct elevator/stairs transition — no walking segment to display.');
+        return;
+    }
+
     const segment = data.segments.find(s => s.level_id === levelId);
     document.getElementById('indoor-current-floor').textContent = levelId.replace('SPL.HQ.', '');
     if (!segment || segment.features.length === 0) return;
 
-    addRouteLayer({ type: 'FeatureCollection', features: segment.features },
-                   '#059669', 0.9, 5, 'indoor-route');
-    fitToFeatures({ type: 'FeatureCollection', features: segment.features });
+
+    const RIBBON_WIDTH_M     = 0.4;   // path width
+    const RIBBON_THICKNESS_M = 0.15;  // how tall the ribbon stands above the floor slab
+    const base = segment.base_height ?? 0;
+
+    // turf.buffer() takes a radius, so half the desired total width on each side.
+    const ribbons = segment.features.map(f =>
+        turf.buffer(f, RIBBON_WIDTH_M / 2, { units: 'meters' })
+    );
+
+    state.map.addSource('indoor-route', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: ribbons },
+    });
+    state.map.addLayer({
+        id: 'indoor-route',
+        type: 'fill-extrusion',
+        source: 'indoor-route',
+        paint: {
+            'fill-extrusion-color':   '#059669',
+            'fill-extrusion-opacity': 0.95,
+            'fill-extrusion-base':    base + 0.05,                     // hover just above the slab
+            'fill-extrusion-height':  base + 0.05 + RIBBON_THICKNESS_M,
+        },
+    });
+
+    // Fit with a 3D tilt to match the BDF style's usual camera angle
+    // (mirrors the pitch/bearing addHighlightAndAnimate() uses for search results).
+    const bounds = new maplibregl.LngLatBounds();
+    segment.features.forEach(f => {
+        if (f.geometry?.coordinates) f.geometry.coordinates.forEach(c => bounds.extend(c));
+    });
+    state.map.fitBounds(bounds, {
+        padding: 100, pitch: 60, bearing: -18, maxZoom: 19.5, duration: 1200,
+    });
 }
 
+/**
+ * Draw the ENTIRE indoor route at once — every floor's walking segment at
+ * its own elevation, connected by vertical "pole" extrusions at each
+ * stair/elevator transition. Replaces the old one-floor-at-a-time renderer.
+ */
+function renderIndoorRouteFull() {
+    clearIndoorLayers();
+    const data = state.indoor.lastRouteData;
+    if (!data) return;
+
+    const RIBBON_WIDTH_M     = 0.6;
+    const RIBBON_THICKNESS_M = 1.2;
+    const POLE_RADIUS_M      = 0.3;
+    const POLE_OVERSHOOT_M   = 1.5; // extend the pole a bit past each floor's base so it visibly connects
+
+    // --- Horizontal ribbons: one buffered polygon per edge, per floor,
+    //     each tagged with its own floor's base height so a single
+    //     fill-extrusion layer can render every floor correctly at once.
+    const ribbonFeatures = [];
+    data.segments.forEach(segment => {
+        const base = segment.base_height ?? 0;
+        segment.features.forEach(f => {
+            const ribbon = turf.buffer(f, RIBBON_WIDTH_M / 2, { units: 'meters' });
+            ribbon.properties = {
+                base_bottom: base + 0.015,
+                base_top:    base + 0.015 + RIBBON_THICKNESS_M,
+            };
+            ribbonFeatures.push(ribbon);
+        });
+    });
+
+    if (ribbonFeatures.length > 0) {
+        state.map.addSource('indoor-route', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: ribbonFeatures },
+        });
+        state.map.addLayer({
+            id: 'indoor-route',
+            type: 'fill-extrusion',
+            source: 'indoor-route',
+            paint: {
+                'fill-extrusion-color':   '#059669',
+                'fill-extrusion-opacity': 1,
+                'fill-extrusion-base':    ['get', 'base_bottom'],
+                'fill-extrusion-height':  ['get', 'base_top'],
+            },
+        });
+    }
+
+    // --- Vertical connectors: a small extruded "pole" at each transition
+    //     point, spanning from the lower floor's elevation to the upper
+    //     floor's elevation.
+    const poleFeatures = (data.transitions || [])
+        .filter(t => {
+            const ok = t.lon != null && t.lat != null;
+            if (!ok) console.warn('Skipping transition — no anchor coords:', t);
+            return ok;
+        })
+        .map(t => {
+            const pole = turf.circle([t.lon, t.lat], POLE_RADIUS_M, { units: 'meters', steps: 16 });
+            let bottom = Math.min(t.base_from, t.base_to) - POLE_OVERSHOOT_M * 0.2;
+            let top    = Math.max(t.base_from, t.base_to) + POLE_OVERSHOOT_M;
+            bottom = Math.max(bottom, 0);
+            if (top <= bottom) top = bottom + 1; // never collapse to zero height
+            pole.properties = { base_bottom: Math.max(bottom, 0), base_top: top };
+            return pole;
+        });
+
+    if ((data.transitions || []).length > 0 && poleFeatures.length === 0) {
+        console.warn('Indoor route has transitions but no anchor coordinates were returned — check vertical_group_id / level_id matches in indoor.units.');
+    }
+
+    if (poleFeatures.length > 0) {
+        state.map.addSource('indoor-transitions', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: poleFeatures },
+        });
+        state.map.addLayer({
+            id: 'indoor-transitions',
+            type: 'fill-extrusion',
+            source: 'indoor-transitions',
+            paint: {
+                'fill-extrusion-color':   '#f59e0b', // amber — visually distinct from the green walking path
+                'fill-extrusion-opacity': 0.9,
+                'fill-extrusion-base':    ['get', 'base_bottom'],
+                'fill-extrusion-height':  ['get', 'base_top'],
+            },
+        });
+    }
+
+    // Fit the camera to everything: all floor segments + all transition points.
+    const bounds = new maplibregl.LngLatBounds();
+    data.segments.forEach(seg => seg.features.forEach(f => {
+        if (f.geometry?.coordinates) f.geometry.coordinates.forEach(c => bounds.extend(c));
+    }));
+    (data.transitions || []).forEach(t => {
+        if (t.lon != null) bounds.extend([t.lon, t.lat]);
+    });
+    if (!bounds.isEmpty()) {
+        state.map.fitBounds(bounds, { padding: 100, pitch: 60, bearing: -18, maxZoom: 19, duration: 1200 });
+    }
+}
 function clearIndoorLayers() {
-    ['indoor-route'].forEach(id => {
+    // 'indoor-route-casing' is only ever present if you're migrating from an
+    // earlier version that drew the route with addRouteLayer() — harmless
+    // no-op if it was never created.
+    ['indoor-route', 'indoor-route-casing', 'indoor-transitions'].forEach(id => {
         if (state.map.getLayer(id))  state.map.removeLayer(id);
         if (state.map.getSource(id)) state.map.removeSource(id);
     });
+    // Stop tracking it for the marching-ants animation loop, in case an
+    // earlier render registered it there.
+    animatedRouteLayers = animatedRouteLayers.filter(id => id !== 'indoor-route');
 }
 
 function clearIndoorMode() {
@@ -1992,11 +2222,12 @@ function clearHighlight() {
 // Each function redraws the data for one mode after a style switch wipes
 // all custom layers. They read from saved state so no API calls are needed.
 
-/** Redraw A→B route lines after a style switch. */
+/** Redraw A→B route lines after a style switch (with ants + 3D casing). */
 function restoreRouteLayers() {
     if (!Array.isArray(state.lastRouteData)) return;
+    clearRouteAnimation();
     state.lastRouteData.forEach((route, i) => {
-        addRouteLayer(route, ROUTE_COLORS[i] || '#5e8bbe', i === 0 ? 0.9 : 0.6, i === 0 ? 7 : 5, `route-${i}`);
+        addRouteLayer(route, ROUTE_COLORS[i] || '#5e8bbe', i === 0 ? 0.9 : 0.6, i === 0 ? 7 : 5, `route-${i}`, true);
     });
 }
 
@@ -2009,11 +2240,14 @@ function restoreTSPRoute() {
 
     const { segments, waypoint_order } = state.lastTSPRouteData;
 
-    // Clean up any leftover TSP layers (support up to 50 segments).
+    // Clean up any leftover TSP layers + casings (support up to 50 segments).
+    clearRouteAnimation();
     for (let i = 0; i < 50; i++) {
         const id = `tsp-segment-${i}`;
-        if (state.map.getLayer(id)) state.map.removeLayer(id);
-        if (state.map.getSource(id)) state.map.removeSource(id);
+        const casingId = `${id}-casing`;
+        if (state.map.getLayer(id))       state.map.removeLayer(id);
+        if (state.map.getLayer(casingId)) state.map.removeLayer(casingId);
+        if (state.map.getSource(id))      state.map.removeSource(id);
     }
 
     // In some MapLibre versions, 'idle' fires before the style is fully loaded.
@@ -2056,24 +2290,32 @@ function restoreServiceArea() {
 
 /** Remove all A→B route layers (supports up to 20 alternatives). */
 function clearRouteLayers() {
-    // Remove alternative route layers (support up to 20 alternatives)
+    clearRouteAnimation();
+    // Remove alternative route layers + their 3D casings (support up to 20)
     for (let i = 0; i < 20; i++) {
         const id = `route-${i}`;
-        if (state.map.getLayer(id))  state.map.removeLayer(id);
-        if (state.map.getSource(id)) state.map.removeSource(id);
+        const casingId = `${id}-casing`;
+        if (state.map.getLayer(id))       state.map.removeLayer(id);
+        if (state.map.getLayer(casingId)) state.map.removeLayer(casingId);
+        if (state.map.getSource(id))      state.map.removeSource(id);
     }
     // Legacy single-route layer (backward compatibility).
-    if (state.map.getLayer('route'))  state.map.removeLayer('route');
-    if (state.map.getSource('route')) state.map.removeSource('route');
+    ['route', 'route-casing'].forEach(id => {
+        if (state.map.getLayer(id))  state.map.removeLayer(id);
+        if (state.map.getSource(id)) state.map.removeSource(id);
+    });
     state.lastRouteData = null;
 }
 
-/** Remove all TSP route-segment layers (supports up to 50 segments). */
+/** Remove all TSP route-segment layers + casings (supports up to 50 segments). */
 function clearTSPLayers() {
+    clearRouteAnimation();
     for (let i = 0; i < 50; i++) {
         const id = `tsp-segment-${i}`;
-        if (state.map.getLayer(id))  state.map.removeLayer(id);
-        if (state.map.getSource(id)) state.map.removeSource(id);
+        const casingId = `${id}-casing`;
+        if (state.map.getLayer(id))       state.map.removeLayer(id);
+        if (state.map.getLayer(casingId)) state.map.removeLayer(casingId);
+        if (state.map.getSource(id))      state.map.removeSource(id);
     }
     state.lastTSPRouteData = null;
 }
@@ -2238,25 +2480,133 @@ function showInfo(text) {
 }
 
 /**
- * Add a GeoJSON line layer to the map. If a source/layer with the same ID
- * already exists it is removed first to prevent "already exists" errors.
+ * Cancel the running marching-ants animation frame (keeps the layer id list).
+ */
+function stopRouteAnimation() {
+    if (routeAnimFrameId != null) {
+        cancelAnimationFrame(routeAnimFrameId);
+        routeAnimFrameId = null;
+    }
+}
+
+/**
+ * Fully stop animation and forget all tracked route layers.
+ */
+function clearRouteAnimation() {
+    stopRouteAnimation();
+    animatedRouteLayers = [];
+}
+
+/**
+ * Drive continuous line-dashoffset animation for all registered route layers
+ * (classic "marching ants" effect).
+ */
+function startRouteAnimation() {
+    stopRouteAnimation(); // only cancel previous frame; keep the layer list
+    if (!state.map || animatedRouteLayers.length === 0) return;
+
+    let offset = 0;
+    const step = () => {
+        offset = (offset + 0.35) % 8;
+        animatedRouteLayers.forEach(id => {
+            if (state.map.getLayer(id)) {
+                try {
+                    state.map.setPaintProperty(id, 'line-dashoffset', -offset);
+                } catch (_) { /* layer may have been removed mid-frame */ }
+            }
+        });
+        routeAnimFrameId = requestAnimationFrame(step);
+    };
+    routeAnimFrameId = requestAnimationFrame(step);
+}
+
+/**
+ * Ensure the map is on the BDF (3D) style with its pitched camera.
+ * Resolves with `true` if a style switch occurred (layers will be restored
+ * by switchMapStyle's idle handler), or `false` if already on BDF.
+ *
+ * @returns {Promise<boolean>}
+ */
+function ensureBdfStyle() {
+    const bdf = STYLES.find(s => s.id === 'bdf-style');
+    if (!bdf) return Promise.resolve(false);
+
+    if (currentStyleId === 'bdf-style') {
+        // Already on BDF — gently enforce the 3D camera if the user flattened it.
+        state.map.easeTo({
+            pitch: bdf.pitch,
+            bearing: bdf.bearing,
+            duration: 800
+        });
+        return Promise.resolve(false);
+    }
+
+    return new Promise(resolve => {
+        const onIdle = () => {
+            state.map.off('idle', onIdle);
+            resolve(true); // style switched → restore* already ran
+        };
+        state.map.once('idle', onIdle);
+        switchMapStyle(bdf);
+    });
+}
+
+/**
+ * Add a GeoJSON line layer to the map with optional 3D casing and marching-ants
+ * dash animation. Designed for the pitched BDF camera.
  *
  * @param {Object} data    - GeoJSON FeatureCollection
  * @param {string} color   - Line color in CSS hex
  * @param {number} opacity - Line opacity 0–1
  * @param {number} width   - Line width in pixels
  * @param {string} layerId - Unique ID for cleanup later
+ * @param {boolean} animate - Register for ants animation (default true)
  */
-function addRouteLayer(data, color, opacity = 0.9, width = 7, layerId = 'route') {
-    if (state.map.getLayer(layerId))  state.map.removeLayer(layerId);
-    if (state.map.getSource(layerId)) state.map.removeSource(layerId);
+function addRouteLayer(data, color, opacity = 0.9, width = 7, layerId = 'route', animate = true) {
+    const casingId = `${layerId}-casing`;
+
+    [layerId, casingId].forEach(id => {
+        if (state.map.getLayer(id))  state.map.removeLayer(id);
+        if (state.map.getSource(id)) state.map.removeSource(id);
+    });
 
     state.map.addSource(layerId, { type: 'geojson', data });
+
+    // Soft wide casing underneath — gives the path volume under a 3D pitch
     state.map.addLayer({
-        id: layerId, type: 'line', source: layerId,
+        id: casingId,
+        type: 'line',
+        source: layerId,
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint:  { 'line-color': color, 'line-width': width, 'line-opacity': opacity }
+        paint: {
+            'line-color': color,
+            'line-width': width + 6,
+            'line-opacity': Math.min(0.35, opacity * 0.4),
+            'line-blur': 2
+        }
     });
+
+    // Main path with dashed pattern (marching ants)
+    state.map.addLayer({
+        id: layerId,
+        type: 'line',
+        source: layerId,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+            'line-color': color,
+            'line-width': width,
+            'line-opacity': opacity,
+            'line-dasharray': [1.5, 2.5],
+            'line-dashoffset': 0
+        }
+    });
+
+    if (animate) {
+        if (!animatedRouteLayers.includes(layerId)) {
+            animatedRouteLayers.push(layerId);
+        }
+        startRouteAnimation();
+    }
 }
 
 /**

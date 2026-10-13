@@ -131,9 +131,10 @@ CREATE TABLE indoor.units (
                                              -- literal UNIT_ID even on the same floor) — use `id`
                                              -- for every join/reference; unit_id is a label only.
     unit_id         text,                   -- e.g. 'SPL.HQ.L0.1481' — NOT unique, keep for display/search
-    use_type        text,                  -- 'EMP offices', 'Stairs', 'Elevator', ...
+    unit_address    text,
     name            text,
     name_long       text,
+    use_type        text,                  -- 'EMP offices', 'Stairs', 'Elevator', ...
     level_id        text NOT NULL,         -- e.g. 'SPL.HQ.L0'
     floor_id        int,                   -- numeric floor order (0,1,2,...)
     height          double precision,
@@ -144,11 +145,12 @@ CREATE TABLE indoor.units (
     geom            geometry(MultiPolygon, 4326) NOT NULL,
     centroid        geometry(Point, 4326)
 );
-CREATE INDEX idx_indoor_units_geom     ON indoor.units USING GIST (geom);
-CREATE INDEX idx_indoor_units_centroid ON indoor.units USING GIST (centroid);
-CREATE INDEX idx_indoor_units_level    ON indoor.units (level_id);
-CREATE INDEX idx_indoor_units_vgroup   ON indoor.units (vertical_group_id);
-CREATE INDEX idx_indoor_units_unit_id  ON indoor.units (unit_id);  -- search/lookup only, not unique
+CREATE INDEX idx_indoor_units_geom          ON indoor.units USING GIST (geom);
+CREATE INDEX idx_indoor_units_centroid      ON indoor.units USING GIST (centroid);
+CREATE INDEX idx_indoor_units_level         ON indoor.units (level_id);
+CREATE INDEX idx_indoor_units_vgroup        ON indoor.units (vertical_group_id);
+CREATE INDEX idx_indoor_units_unit_address  ON indoor.units (unit_address);  
+CREATE INDEX idx_indoor_units_unit_id       ON indoor.units (unit_id);  -- search/lookup only, not unique
 
 -- -----------------------------------------------------------------------
 -- indoor.raw_corridors — YOUR MANUALLY DIGITIZED corridor centerlines.
@@ -216,11 +218,12 @@ CREATE INDEX idx_indoor_edges_geom   ON indoor.edges USING GIST (geom);
 TRUNCATE indoor.units CASCADE;
 
 INSERT INTO indoor.units
-    (unit_id, use_type, name, name_long, level_id, floor_id, height, base, category, geom, centroid)
+    (unit_id, unit_address, name, use_type, name_long, level_id, floor_id, height, base, category, geom, centroid)
 SELECT
     unit_id,
-    use_type,
+    unitaddres,
     name,
+    use_type,
     name_long,
     level_id,
     floorid,                      -- adjust name if \d showed a different casing
